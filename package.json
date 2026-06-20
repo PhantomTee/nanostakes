@@ -9,6 +9,7 @@
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "warden": "npm run dev --workspace=@nanostakes/warden",
+    "web": "npm run dev --workspace=@nanostakes/web",
     "contender": "npm run dev --workspace=@nanostakes/contender",
     "onboard": "tsx scripts/onboard.ts",
     "match": "tsx scripts/run-match.ts"

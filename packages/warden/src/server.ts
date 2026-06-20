@@ -3,8 +3,6 @@ import express from "express";
 import type { Request, Response } from "express";
 import { ENTRY_STAKE_EACH, getGame } from "@nanostakes/bracket";
 import { gateway, wardenAccount } from "./gateway.js";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, type MatchRecord } from "./state.js";
 import { settleMatch } from "./settle.js";
 import { getLeaderboard, getTemperamentStats, getAgentRecord } from "./ledger.js";
@@ -19,8 +17,18 @@ interface PaidRequest extends Request {
 const app = express();
 app.use(express.json());
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-app.use(express.static(path.join(__dirname, "../public")));
+// The frontend (packages/web) is deployed separately from this server, so allow
+// cross-origin requests from it.
+app.use((req: Request, res: Response, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+});
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, warden: wardenAccount.address });
