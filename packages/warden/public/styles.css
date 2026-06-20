@@ -128,6 +128,7 @@ hr.hairline { border: none; border-top: 1px solid var(--hairline); margin: 0; }
 .hero-bg {
   position: absolute; inset: 0; z-index: 0;
   width: 100%; height: 100%; object-fit: cover;
+  transform: scale(0.95); transform-origin: center;
 }
 .hero-scrim {
   position: absolute; inset: 0; z-index: 1;
