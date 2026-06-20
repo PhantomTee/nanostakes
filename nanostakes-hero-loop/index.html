@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=800" />
+    <title>Nanostakes Arena — hero loop</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 800px;
+        overflow: hidden;
+        background: #11151c;
+      }
+      :root {
+        --ink: #11151c;
+        --hairline: #2a313d;
+        --paper: #ece4d3;
+        --stamp: #b3331f;
+        --stamp-bright: #d6432a;
+        --wire: #d99a3d;
+        --settle: #2f6f62;
+        --settle-bright: #3f8f7d;
+        --text: #e9e4d8;
+        --text-muted: #8b8478;
+      }
+      body {
+        font-family: "IBM Plex Mono", monospace;
+      }
+
+      #root {
+        position: relative;
+        width: 1920px;
+        height: 800px;
+        overflow: hidden;
+        background: var(--ink);
+      }
+      .clip {
+        position: absolute;
+      }
+      #scene {
+        inset: 0;
+        overflow: hidden;
+      }
+
+      /* ---------- background layers ---------- */
+      .bg-glow {
+        position: absolute;
+        left: 50%;
+        top: -180px;
+        width: 1400px;
+        height: 1000px;
+        transform: translateX(-50%);
+        background: radial-gradient(circle, rgba(217, 154, 61, 0.22) 0%, rgba(217, 154, 61, 0) 62%);
+      }
+      .bg-grid {
+        position: absolute;
+        inset: 0;
+        background-image:
+          repeating-linear-gradient(0deg, transparent 0 79px, rgba(139, 132, 120, 0.16) 79px 80px),
+          repeating-linear-gradient(90deg, transparent 0 79px, rgba(139, 132, 120, 0.16) 79px 80px);
+      }
+      .bg-rings {
+        position: absolute;
+        left: 960px;
+        top: 420px;
+        width: 760px;
+        height: 760px;
+        transform: translate(-50%, -50%);
+      }
+      .corner-gear {
+        position: absolute;
+        right: 86px;
+        top: 56px;
+        width: 96px;
+        height: 96px;
+      }
+
+      /* ---------- colosseum ---------- */
+      .colosseum {
+        position: absolute;
+        left: 550px;
+        top: 264px;
+        width: 820px;
+        height: 456px;
+        background: var(--paper);
+        border: 5px solid var(--hairline);
+        border-radius: 20px 20px 4px 4px;
+        background-image:
+          repeating-linear-gradient(0deg, transparent 0 37px, rgba(42, 49, 61, 0.45) 37px 40px),
+          repeating-linear-gradient(90deg, transparent 0 77px, rgba(42, 49, 61, 0.3) 77px 80px);
+      }
+      .merlons {
+        position: absolute;
+        top: -26px;
+        left: 18px;
+        right: 18px;
+        height: 26px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .merlons i {
+        display: block;
+        width: 42px;
+        height: 26px;
+        background: var(--paper);
+        border: 4px solid var(--hairline);
+        border-bottom: none;
+        border-radius: 4px 4px 0 0;
+      }
+      .arch-window {
+        position: absolute;
+        bottom: 0;
+        width: 168px;
+        height: 290px;
+        background: var(--ink);
+        border: 5px solid var(--hairline);
+        border-bottom: none;
+        border-radius: 84px 84px 0 0;
+      }
+      .arch-window.a1 {
+        left: 56px;
+      }
+      .arch-window.a2 {
+        left: 326px;
+      }
+      .arch-window.a3 {
+        left: 596px;
+      }
+
+      /* ---------- banner pole ---------- */
+      .banner-pole {
+        position: absolute;
+        left: 1736px;
+        top: 232px;
+        width: 10px;
+        height: 488px;
+        background: var(--hairline);
+        border-radius: 4px;
+      }
+      .banner-flag {
+        position: absolute;
+        left: 1746px;
+        top: 248px;
+        width: 132px;
+        height: 84px;
+        background: var(--stamp);
+        border-radius: 0 6px 6px 0;
+        transform-origin: left center;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .banner-flag .seal {
+        width: 38px;
+        height: 38px;
+        border-radius: 50%;
+        background: var(--paper);
+        border: 4px solid var(--stamp-bright);
+      }
+
+      /* ---------- robots (shared anatomy) ---------- */
+      .robot {
+        position: absolute;
+        width: 190px;
+        height: 230px;
+      }
+      .r-antenna {
+        position: absolute;
+        left: 50%;
+        top: -22px;
+        width: 4px;
+        height: 24px;
+        background: var(--hairline);
+        transform: translateX(-50%);
+      }
+      .r-antenna-tip {
+        position: absolute;
+        left: 50%;
+        top: -30px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--wire);
+        box-shadow: 0 0 14px var(--wire);
+        transform: translateX(-50%);
+      }
+      .r-head {
+        position: relative;
+        width: 104px;
+        height: 76px;
+        margin: 0 auto;
+        background: var(--paper);
+        border: 5px solid var(--hairline);
+        border-radius: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+      }
+      .r-eye {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--settle-bright);
+        box-shadow: 0 0 14px var(--settle-bright);
+      }
+      .r-body {
+        position: relative;
+        width: 142px;
+        height: 100px;
+        margin: -8px auto 0;
+        background: var(--paper);
+        border: 5px solid var(--hairline);
+        border-radius: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+      }
+      .r-rivet {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: var(--wire);
+      }
+      .r-legs {
+        display: flex;
+        justify-content: center;
+        gap: 30px;
+        margin-top: 4px;
+      }
+      .r-leg {
+        width: 22px;
+        height: 26px;
+        background: var(--hairline);
+        border-radius: 0 0 6px 6px;
+      }
+      .r-arm {
+        position: absolute;
+        width: 20px;
+        height: 92px;
+        background: var(--paper);
+        border: 5px solid var(--hairline);
+        border-radius: 12px;
+      }
+
+      /* ---------- robot A: hammer ---------- */
+      #robotA {
+        left: 196px;
+        top: 470px;
+      }
+      #robotA .r-arm {
+        left: 142px;
+        top: 92px;
+        transform-origin: top center;
+        transform: rotate(-10deg);
+      }
+      #robotA .r-hammer-head {
+        position: absolute;
+        left: -22px;
+        bottom: -6px;
+        width: 56px;
+        height: 26px;
+        background: var(--text-muted);
+        border: 4px solid var(--hairline);
+        border-radius: 6px;
+      }
+      .anvil-stand {
+        position: absolute;
+        left: 392px;
+        top: 624px;
+        width: 64px;
+        height: 56px;
+        background: var(--hairline);
+        border-radius: 4px;
+      }
+      .anvil-stone {
+        position: absolute;
+        left: 380px;
+        top: 596px;
+        width: 88px;
+        height: 36px;
+        background: var(--paper);
+        border: 4px solid var(--hairline);
+        border-radius: 6px;
+      }
+      .spark {
+        position: absolute;
+        left: 410px;
+        top: 588px;
+        width: 30px;
+        height: 30px;
+        opacity: 0;
+      }
+      .spark::before,
+      .spark::after {
+        content: "";
+        position: absolute;
+        width: 26px;
+        height: 5px;
+        background: var(--stamp-bright);
+        border-radius: 3px;
+        top: 12px;
+        left: 2px;
+      }
+      .spark::before {
+        transform: rotate(28deg);
+      }
+      .spark::after {
+        transform: rotate(-28deg);
+      }
+      .dust {
+        position: absolute;
+        left: 392px;
+        top: 600px;
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(236, 228, 211, 0.5) 0%, rgba(236, 228, 211, 0) 70%);
+        opacity: 0;
+      }
+
+      /* ---------- robot B: crane (stands on the parapet, in open sky) ---------- */
+      #robotB {
+        left: 885px;
+        top: 46px;
+      }
+      .crane-rig {
+        position: absolute;
+        left: 920px;
+        top: 44px;
+        width: 260px;
+        height: 220px;
+        transform-origin: 60px 200px;
+      }
+      .crane-boom {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 230px;
+        height: 22px;
+        background: var(--paper);
+        border: 5px solid var(--hairline);
+        border-radius: 10px;
+        transform-origin: 16px 11px;
+      }
+      .crane-cable {
+        position: absolute;
+        left: 198px;
+        top: 14px;
+        width: 4px;
+        height: 64px;
+        background: var(--hairline);
+      }
+      .crane-block {
+        position: absolute;
+        left: 168px;
+        top: 78px;
+        width: 64px;
+        height: 50px;
+        background: var(--paper);
+        border: 5px solid var(--hairline);
+        border-radius: 6px;
+      }
+
+      /* ---------- robot C: banner-raiser ---------- */
+      #robotC {
+        left: 1530px;
+        top: 470px;
+      }
+      #robotC .r-arm {
+        left: 142px;
+        top: 86px;
+        transform-origin: top center;
+        transform: rotate(18deg);
+      }
+
+      /* ---------- foreground ruler ---------- */
+      .ruler {
+        position: absolute;
+        left: 64px;
+        right: 64px;
+        bottom: 30px;
+        height: 30px;
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+      }
+      .ruler i {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        font-size: 16px;
+        color: var(--text-muted);
+        letter-spacing: 0.04em;
+      }
+      .ruler i::after {
+        content: "";
+        display: block;
+        width: 2px;
+        height: 12px;
+        background: var(--hairline);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="800" data-duration="6">
+      <section id="scene" class="clip" data-start="0" data-duration="6" data-track-index="1">
+        <div class="bg-glow" data-layout-allow-overflow></div>
+        <div class="bg-grid"></div>
+
+        <svg class="bg-rings" data-layout-allow-overflow viewBox="0 0 760 760" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="380" cy="380" r="360" fill="none" stroke="rgba(42,49,61,0.55)" stroke-width="2" stroke-dasharray="2 18" />
+          <circle cx="380" cy="380" r="300" fill="none" stroke="rgba(42,49,61,0.5)" stroke-width="2" stroke-dasharray="14 10" />
+          <circle cx="380" cy="380" r="240" fill="none" stroke="rgba(42,49,61,0.45)" stroke-width="2" stroke-dasharray="2 12" />
+        </svg>
+
+        <svg class="corner-gear" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(0 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(45 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(90 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(135 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(180 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(225 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(270 50 50)" />
+          <rect x="45" y="2" width="10" height="16" rx="2" fill="var(--paper)" stroke="var(--hairline)" stroke-width="3" transform="rotate(315 50 50)" />
+          <circle cx="50" cy="50" r="22" fill="var(--paper)" stroke="var(--hairline)" stroke-width="4" />
+          <circle cx="50" cy="50" r="7" fill="var(--ink)" />
+        </svg>
+
+        <div class="colosseum">
+          <div class="merlons">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+          <div class="arch-window a1"></div>
+          <div class="arch-window a2"></div>
+          <div class="arch-window a3"></div>
+        </div>
+
+        <div class="banner-pole"></div>
+        <div class="banner-flag" id="bannerFlag"><span class="seal"></span></div>
+
+        <!-- robot A: hammer -->
+        <div class="anvil-stone"></div>
+        <div class="anvil-stand"></div>
+        <div class="dust" id="dust"></div>
+        <div class="spark" id="spark"></div>
+        <div class="robot" id="robotA">
+          <div class="r-antenna"></div>
+          <div class="r-antenna-tip" id="eyeTipA"></div>
+          <div class="r-head">
+            <div class="r-eye" id="eyeA1"></div>
+            <div class="r-eye" id="eyeA2"></div>
+          </div>
+          <div class="r-body">
+            <div class="r-rivet"></div>
+            <div class="r-rivet"></div>
+            <div class="r-rivet"></div>
+          </div>
+          <div class="r-legs"><div class="r-leg"></div><div class="r-leg"></div></div>
+          <div class="r-arm" id="armA">
+            <div class="r-hammer-head"></div>
+          </div>
+        </div>
+
+        <!-- robot B: crane -->
+        <div class="crane-rig" id="craneRig">
+          <div class="crane-boom" id="craneBoom"></div>
+          <div class="crane-cable"></div>
+          <div class="crane-block" id="craneBlock"></div>
+        </div>
+        <div class="robot" id="robotB">
+          <div class="r-antenna"></div>
+          <div class="r-antenna-tip"></div>
+          <div class="r-head">
+            <div class="r-eye" id="eyeB1"></div>
+            <div class="r-eye" id="eyeB2"></div>
+          </div>
+          <div class="r-body">
+            <div class="r-rivet"></div>
+            <div class="r-rivet"></div>
+            <div class="r-rivet"></div>
+          </div>
+          <div class="r-legs"><div class="r-leg"></div><div class="r-leg"></div></div>
+        </div>
+
+        <!-- robot C: banner raiser -->
+        <div class="robot" id="robotC">
+          <div class="r-antenna"></div>
+          <div class="r-antenna-tip"></div>
+          <div class="r-head">
+            <div class="r-eye" id="eyeC1"></div>
+            <div class="r-eye" id="eyeC2"></div>
+          </div>
+          <div class="r-body">
+            <div class="r-rivet"></div>
+            <div class="r-rivet"></div>
+            <div class="r-rivet"></div>
+          </div>
+          <div class="r-legs"><div class="r-leg"></div><div class="r-leg"></div></div>
+          <div class="r-arm" id="armC"></div>
+        </div>
+
+        <div class="ruler" id="ruler">
+          <i>01</i><i>02</i><i>03</i><i>04</i><i>05</i><i>06</i><i>07</i><i>08</i><i>09</i><i>10</i><i>11</i><i>12</i><i>13</i><i>14</i>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // ---- background ambient (cycle 1s, 6 breaths across the 6s loop) ----
+      tl.fromTo(
+        ".bg-glow",
+        { scale: 1, opacity: 0.85 },
+        { scale: 1.07, opacity: 1, duration: 1, ease: "sine.inOut", yoyo: true, repeat: 5 },
+        0,
+      );
+      tl.fromTo(
+        ".bg-grid",
+        { opacity: 0.7 },
+        { opacity: 1, duration: 1, ease: "sine.inOut", yoyo: true, repeat: 5 },
+        0.2,
+      );
+      tl.fromTo(
+        "#ruler",
+        { opacity: 0.7 },
+        { opacity: 1, duration: 1, ease: "sine.inOut", yoyo: true, repeat: 5 },
+        0.4,
+      );
+
+      // single full slow rotation across the whole loop — returns to identical angle at t=6
+      tl.fromTo(".bg-rings", { rotation: 0 }, { rotation: 360, duration: 6, ease: "none" }, 0);
+      tl.set(".bg-rings", { transformOrigin: "50% 50%" }, 0);
+
+      // gear spins 3 full turns (2s each) — always back at 0deg on each turn
+      tl.fromTo(".corner-gear", { rotation: 0 }, { rotation: 360, duration: 2, ease: "none", repeat: 2 }, 0);
+      tl.set(".corner-gear", { transformOrigin: "50% 50%" }, 0);
+
+      // ---- robot A: hammer strikes once per second, 6 strikes ----
+      tl.fromTo(
+        "#armA",
+        { rotation: -10 },
+        { rotation: -82, duration: 0.5, ease: "power1.inOut", yoyo: true, repeat: 11 },
+        0.1,
+      );
+      const strikeTimes = [0.6, 1.6, 2.6, 3.6, 4.6, 5.6];
+      strikeTimes.forEach((t) => {
+        tl.fromTo("#spark", { opacity: 0, scale: 0.5 }, { opacity: 1, scale: 1.2, duration: 0.1, ease: "power2.out" }, t);
+        tl.to("#spark", { opacity: 0, scale: 1.5, duration: 0.16, ease: "power1.in", overwrite: "auto" }, t + 0.1);
+        tl.fromTo("#dust", { opacity: 0, scale: 0.6 }, { opacity: 0.7, scale: 1, duration: 0.18, ease: "power1.out" }, t);
+        tl.to("#dust", { opacity: 0, scale: 1.3, duration: 0.4, ease: "power1.in", overwrite: "auto" }, t + 0.18);
+        tl.fromTo("#robotA", { y: 0 }, { y: 5, duration: 0.07, ease: "power1.out" }, t);
+        tl.to("#robotA", { y: 0, duration: 0.28, ease: "power2.out", overwrite: "auto" }, t + 0.07);
+      });
+
+      // ---- robot B: crane rig sways twice (3s each), block hoists 3 times (2s each) ----
+      tl.fromTo(
+        "#craneRig",
+        { rotation: -7 },
+        { rotation: -1, duration: 1.5, ease: "sine.inOut", yoyo: true, repeat: 3 },
+        0.15,
+      );
+      tl.fromTo(
+        "#craneBlock",
+        { y: 0 },
+        { y: -20, duration: 1, ease: "sine.inOut", yoyo: true, repeat: 5 },
+        0.3,
+      );
+
+      // ---- robot C: banner flutters (5 waves of 0.6s), arm idles, eyes settle ----
+      tl.fromTo(
+        "#bannerFlag",
+        { skewY: -5, scaleX: 0.97 },
+        { skewY: 5, scaleX: 1.03, duration: 0.6, ease: "sine.inOut", yoyo: true, repeat: 9 },
+        0,
+      );
+      tl.set("#bannerFlag", { transformOrigin: "left center" }, 0);
+      tl.fromTo(
+        "#armC",
+        { rotation: 12 },
+        { rotation: 26, duration: 1, ease: "sine.inOut", yoyo: true, repeat: 5 },
+        0.25,
+      );
+
+      // ---- blinks: punctual, staggered, always resolve back to open ----
+      const blink = (selA, selB, t) => {
+        tl.to([selA, selB], { scaleY: 0.12, duration: 0.07, ease: "power1.in" }, t);
+        tl.to([selA, selB], { scaleY: 1, duration: 0.1, ease: "power1.out" }, t + 0.07);
+      };
+      blink("#eyeA1", "#eyeA2", 1.9);
+      blink("#eyeA1", "#eyeA2", 4.7);
+      blink("#eyeB1", "#eyeB2", 0.95);
+      blink("#eyeB1", "#eyeB2", 3.75);
+      blink("#eyeC1", "#eyeC2", 2.65);
+      blink("#eyeC1", "#eyeC2", 5.35);
+
+      // antenna tip blinking light on robot A — 4 flashes
+      tl.fromTo(
+        "#eyeTipA",
+        { opacity: 0.4 },
+        { opacity: 1, duration: 0.75, ease: "sine.inOut", yoyo: true, repeat: 7 },
+        0,
+      );
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
