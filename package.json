@@ -1,0 +1,28 @@
+{
+  "name": "nanostakes-arena",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "warden": "npm run dev --workspace=@nanostakes/warden",
+    "contender": "npm run dev --workspace=@nanostakes/contender",
+    "onboard": "tsx scripts/onboard.ts",
+    "match": "tsx scripts/run-match.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.3",
+    "tsx": "^4.19.2",
+    "@types/node": "^22.10.5"
+  },
+  "dependencies": {
+    "@circle-fin/x402-batching": "^3.2.0",
+    "@x402/core": "^2.15.0",
+    "@x402/evm": "^2.15.0",
+    "viem": "^2.21.26",
+    "dotenv": "^16.4.7"
+  }
+}

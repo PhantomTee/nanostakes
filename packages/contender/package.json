@@ -1,0 +1,20 @@
+{
+  "name": "@nanostakes/contender",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@nanostakes/shared": "*",
+    "groq-sdk": "^1.2.1",
+    "viem": "^2.21.26",
+    "@circle-fin/x402-batching": "^3.2.0",
+    "@x402/core": "^2.15.0",
+    "@x402/evm": "^2.15.0",
+    "dotenv": "^16.4.7"
+  }
+}

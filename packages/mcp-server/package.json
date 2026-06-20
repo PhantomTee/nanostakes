@@ -1,0 +1,20 @@
+{
+  "name": "@nanostakes/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "nanostakes-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@nanostakes/shared": "*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.24.1",
+    "dotenv": "^16.4.7"
+  }
+}
