@@ -9,7 +9,7 @@ const EXPLORER_ADDR_BASE = "https://testnet.arcscan.app/address/";
 function txLink(hash?: string) {
   if (!hash) return "";
   if (!hash.startsWith("0x")) {
-    return `<span class="t-row sealed" style="display:inline;" title="Gateway transfer ID — settles on-chain in a later batch">${hash.slice(0, 8)}&hellip; (pending settlement)</span>`;
+    return `<span class="t-row sealed" style="display:inline;" title="Gateway transfer ID, settles on-chain in a later batch">${hash.slice(0, 8)}&hellip; (pending settlement)</span>`;
   }
   return `<a class="tx-link" href="${EXPLORER_TX_BASE}${hash}" target="_blank" rel="noopener">${hash.slice(0, 10)}&hellip;${hash.slice(-6)}</a>`;
 }
@@ -75,7 +75,7 @@ export default function ConcourseApp() {
           return `<div class="player-ticket">
             <div class="addr">${addrLink(p)}</div>
             ${badgesHtml}
-            <div class="stake-line">staked: ${stakeTx ? txLink(stakeTx) : state.acted?.[p] ? "yes" : "—"}</div>
+            <div class="stake-line">staked: ${stakeTx ? txLink(stakeTx) : state.acted?.[p] ? "yes" : "n/a"}</div>
           </div>`;
         })
         .join("");
@@ -108,7 +108,7 @@ export default function ConcourseApp() {
             })
             .join("")
         : `<div class="round-panel">
-            <h3>Standoff — simultaneous commit</h3>
+            <h3>Standoff: simultaneous commit</h3>
             ${Object.entries(state.choices || {})
               .map(([addr, c]) =>
                 c === null
@@ -153,7 +153,7 @@ export default function ConcourseApp() {
           (a: any, i: number) => `<tr>
             <td>${i + 1}</td>
             <td>${addrLink(a.address)}</td>
-            <td>${a.temperament ?? "—"}</td>
+            <td>${a.temperament ?? "n/a"}</td>
             <td><span class="seal on-ink--${a.standing}">${a.standing}</span></td>
             <td>${a.wins}/${a.losses}/${a.ties}</td>
             <td style="color:${a.netPnl >= 0 ? "var(--settle-bright)" : "var(--stamp-bright)"}">${a.netPnl >= 0 ? "+" : ""}${a.netPnl.toFixed(4)}</td>
@@ -184,10 +184,10 @@ export default function ConcourseApp() {
         evt.type === "match.created"
           ? `match ${evt.matchId.slice(0, 8)}… created (${evt.gameId}, ${(evt.data.players || []).length} players)`
           : evt.type === "match.staked"
-            ? `${(evt.data.payer || "").slice(0, 8)}… staked USDC on ${evt.matchId.slice(0, 8)}…${evt.data.status === "ACTIVE" ? " — both staked, match ACTIVE" : ""}`
+            ? `${(evt.data.payer || "").slice(0, 8)}… staked USDC on ${evt.matchId.slice(0, 8)}…${evt.data.status === "ACTIVE" ? ", both staked, match ACTIVE" : ""}`
             : evt.type === "match.move"
               ? `${(evt.data.player || "").slice(0, 8)}… played ${JSON.stringify(evt.data.move)} on ${evt.matchId.slice(0, 8)}…`
-              : `match ${evt.matchId.slice(0, 8)}… SETTLED — payouts: ${Object.keys(evt.data.payoutTxs || {}).length}`;
+              : `match ${evt.matchId.slice(0, 8)}… SETTLED, payouts: ${Object.keys(evt.data.payoutTxs || {}).length}`;
       const div = document.createElement("div");
       div.className = `feed-line ${evt.type.replace(".", "-")}`;
       div.innerHTML = `<span class="t">${time}</span>${summary}`;
@@ -252,7 +252,7 @@ export default function ConcourseApp() {
             No private valuations shown. No sealed offers shown early.
           </h1>
           <p className="dek">
-            Everything below is the same public view every player sees — pulled straight from the Warden&apos;s
+            Everything below is the same public view every player sees, pulled straight from the Warden&apos;s
             event feed as it happens.
           </p>
         </div>

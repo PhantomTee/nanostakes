@@ -17,7 +17,7 @@ export default function WardenStatus() {
         const data = await res.json();
         if (cancelled) return;
         if (dotRef.current) dotRef.current.style.color = "#3f8f7d";
-        if (linkRef.current) linkRef.current.title = `Warden online — ${data.warden}`;
+        if (linkRef.current) linkRef.current.title = `Warden online: ${data.warden}`;
         const docket = document.getElementById("footerDocket");
         if (docket) docket.textContent = `Docket no. ${data.warden.slice(0, 10)}…`;
       } catch {

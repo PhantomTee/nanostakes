@@ -18,7 +18,7 @@ export default function LedgerPreview() {
         if (cancelled) return;
         if (!leaderboard.length) {
           el.innerHTML =
-            '<p style="color:var(--text-on-paper-muted)">No settled matches yet — the first row is waiting to be written.</p>';
+            '<p style="color:var(--text-on-paper-muted)">No settled matches yet. The first row is waiting to be written.</p>';
           return;
         }
         const rows = leaderboard
@@ -27,7 +27,7 @@ export default function LedgerPreview() {
             (a: any, i: number) => `<tr>
               <td>${i + 1}</td>
               <td><a class="addr-link" href="https://testnet.arcscan.app/address/${a.address}" target="_blank" rel="noopener">${a.address.slice(0, 10)}&hellip;</a></td>
-              <td>${a.temperament ?? "—"}</td>
+              <td>${a.temperament ?? "n/a"}</td>
               <td><span class="seal seal--${a.standing}">${a.standing}</span></td>
               <td>${a.wins}/${a.losses}/${a.ties}</td>
               <td class="${a.netPnl >= 0 ? "pnl-pos" : "pnl-neg"}">${a.netPnl >= 0 ? "+" : ""}${a.netPnl.toFixed(4)}</td>
@@ -41,7 +41,7 @@ export default function LedgerPreview() {
       } catch {
         if (!cancelled && el) {
           el.innerHTML =
-            '<p style="color:var(--text-on-paper-muted)">Couldn\'t reach the Warden — the live ledger lives at /ledger.</p>';
+            '<p style="color:var(--text-on-paper-muted)">Couldn\'t reach the Warden. The live ledger lives at /ledger.</p>';
         }
       }
     }

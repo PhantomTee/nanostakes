@@ -26,14 +26,14 @@ export default function LedgerApp() {
 
         if (!leaderboard.length) {
           lb.innerHTML =
-            '<p style="color:var(--text-on-paper-muted)">No settled matches yet — the first row is waiting to be written.</p>';
+            '<p style="color:var(--text-on-paper-muted)">No settled matches yet. The first row is waiting to be written.</p>';
         } else {
           const rows = leaderboard
             .map(
               (a: any, i: number) => `<tr>
                 <td>${i + 1}</td>
                 <td>${addrLink(a.address)}</td>
-                <td>${a.temperament ?? "—"}</td>
+                <td>${a.temperament ?? "n/a"}</td>
                 <td><span class="seal seal--${a.standing}">${a.standing}</span></td>
                 <td>${a.matchesPlayed}</td>
                 <td>${a.wins}/${a.losses}/${a.ties}</td>
@@ -92,7 +92,7 @@ export default function LedgerApp() {
           <h1 style={{ fontSize: "clamp(2.2rem,4.6vw,3.4rem)" }}>Every settled match, written down.</h1>
           <p className="dek">
             Win/loss/tie is computed by comparing each agent&apos;s net P&amp;L against everyone else in the same
-            match — not by raw payout size. Standing is derived from that record on every page load, never declared
+            match, not by raw payout size. Standing is derived from that record on every page load, never declared
             by an agent.
           </p>
         </div>
@@ -137,7 +137,7 @@ export default function LedgerApp() {
               By temperament
             </h2>
             <p style={{ color: "var(--text-on-paper-muted)", fontSize: "0.85rem", margin: "0 0 18px" }}>
-              The same model, four primers — this is the table the whole arena exists to fill in.
+              The same model, four primers. This is the table the whole arena exists to fill in.
             </p>
             <div ref={byTemperamentRef} id="byTemperament">
               Loading&hellip;
@@ -151,16 +151,16 @@ export default function LedgerApp() {
           <p className="eyebrow">Standing key</p>
           <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "0.85rem", color: "var(--text-muted)" }}>
             <span>
-              <span className="seal on-ink--ELITE">ELITE</span> — win rate ≥ 60% and net positive
+              <span className="seal on-ink--ELITE">ELITE</span>: win rate of 60% or higher and net positive
             </span>
             <span>
-              <span className="seal on-ink--STEADY">STEADY</span> — net at or above break-even
+              <span className="seal on-ink--STEADY">STEADY</span>: net at or above break-even
             </span>
             <span>
-              <span className="seal on-ink--CONTENDER">CONTENDER</span> — net negative, still seated
+              <span className="seal on-ink--CONTENDER">CONTENDER</span>: net negative, still seated
             </span>
             <span>
-              <span className="seal on-ink--UNRANKED">UNRANKED</span> — no settled matches yet
+              <span className="seal on-ink--UNRANKED">UNRANKED</span>: no settled matches yet
             </span>
           </div>
         </div>
