@@ -57,23 +57,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const STAKE_RETRY_ATTEMPTS = 24;
+const STAKE_RETRY_ATTEMPTS = 6;
 const STAKE_RETRY_DELAY_MS = 5000;
 
 /**
- * Circle Gateway settles payments in batches (see Warden's settle.ts), so a
- * payout from the match an agent just finished may not be available yet by
- * the time it immediately stakes into the next one. A single failed stake
- * payment used to propagate straight up and count as a driver crash —
- * three of those in a row auto-paused the agent even though it had funds,
- * just not yet settled. Retry instead, on the same budget settle.ts itself
- * waits on (120s) before giving up for real.
+ * Two distinct reasons staking can fail, and they need different handling:
+ *
+ * 1. Genuinely insufficient balance (the common case — a prior match was lost
+ *    and the remainder is below the next entry stake). Retrying never helps
+ *    this; it just delays an inevitable failure. Fail fast with a message
+ *    that says what actually happened, so it's obvious funding is needed.
+ * 2. A real transient Gateway hiccup despite having enough balance. Worth a
+ *    short retry budget (30s) — not the 120s settle.ts uses server-side,
+ *    since `withdrawing` would be nonzero if a payout were genuinely still
+ *    in flight, and we've already confirmed `available` covers the stake.
  */
 async function payStakeWithRetry(
   client: GatewayClient,
   url: string,
+  entryStakeEach: number,
   log: (m: string) => void,
 ): Promise<Awaited<ReturnType<GatewayClient["pay"]>>> {
+  const balances = await client.getBalances();
+  const available = Number(balances.gateway.formattedAvailable);
+  if (available < entryStakeEach) {
+    throw new Error(
+      `Insufficient balance to stake: have ${available.toFixed(6)} USDC available, need ${entryStakeEach} USDC. Fund the session wallet to resume.`,
+    );
+  }
+
   let lastErr: unknown;
   for (let attempt = 1; attempt <= STAKE_RETRY_ATTEMPTS; attempt++) {
     try {
@@ -82,7 +94,7 @@ async function payStakeWithRetry(
       lastErr = err;
       if (attempt < STAKE_RETRY_ATTEMPTS) {
         log(
-          `stake payment attempt ${attempt}/${STAKE_RETRY_ATTEMPTS} failed (${(err as Error).message}) — a prior payout may still be settling, retrying in ${STAKE_RETRY_DELAY_MS / 1000}s`,
+          `stake payment attempt ${attempt}/${STAKE_RETRY_ATTEMPTS} failed (${(err as Error).message}) despite sufficient balance — retrying in ${STAKE_RETRY_DELAY_MS / 1000}s`,
         );
         await sleep(STAKE_RETRY_DELAY_MS);
       }
@@ -125,7 +137,13 @@ async function playMatch(
   const me = client.address;
   const log = onEvent ?? (() => {});
 
-  const stakePayment = await payStakeWithRetry(client, `${wardenUrl}/match/${matchId}/stake`, log);
+  const preStakeState = await getState(wardenUrl, matchId, me);
+  const stakePayment = await payStakeWithRetry(
+    client,
+    `${wardenUrl}/match/${matchId}/stake`,
+    preStakeState.entryStakeEach,
+    log,
+  );
   log(`${agent.name} staked entry for match ${matchId} (${stakePayment.transaction})`);
 
   while (!isStopped?.()) {
