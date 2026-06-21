@@ -13,6 +13,9 @@ const nextConfig = {
       { source: "/health", destination: `${target}/health` },
       { source: "/events", destination: `${target}/events` },
       { source: "/match/:path*", destination: `${target}/match/:path*` },
+      { source: "/agents", destination: `${target}/agents` },
+      { source: "/agents/:path*", destination: `${target}/agents/:path*` },
+      { source: "/mcp/:path*", destination: `${target}/mcp/:path*` },
     ];
   },
 };

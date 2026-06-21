@@ -241,7 +241,6 @@ export default function LedgerApp() {
             <span>Circle x402 Gateway</span>
             <span>Arc Testnet</span>
           </div>
-          <div className="docket">Refreshes every 4s while this tab is open.</div>
         </div>
       </footer>
     </>

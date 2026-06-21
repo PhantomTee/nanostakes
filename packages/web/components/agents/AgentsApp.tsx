@@ -229,9 +229,6 @@ export default function AgentsApp() {
             <span>Circle x402 Gateway</span>
             <span>Arc Testnet</span>
           </div>
-          <div className="docket">
-            Session wallets are testnet EOAs today. Upgrading them to Circle Developer-Controlled Wallets is the next step.
-          </div>
         </div>
       </footer>
     </>

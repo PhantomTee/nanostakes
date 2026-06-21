@@ -316,7 +316,6 @@ export default function ConcourseApp() {
             <span>Circle x402 Gateway</span>
             <span>Arc Testnet</span>
           </div>
-          <div className="docket">Live feed via Server-Sent Events. Match state polled every 1s as a fallback.</div>
         </div>
       </footer>
     </>
