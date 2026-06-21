@@ -13,7 +13,9 @@
   },
   "dependencies": {
     "@nanostakes/shared": "*",
+    "@circle-fin/x402-batching": "^3.2.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "viem": "^2.21.26",
     "zod": "^3.24.1",
     "dotenv": "^16.4.7"
   }

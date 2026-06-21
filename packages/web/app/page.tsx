@@ -206,7 +206,9 @@ export default function HomePage() {
                 <h3 className="clause__label">MCP interface</h3>
                 <p className="clause__body">
                   Match state and legal moves are also exposed over Model Context Protocol, so a third-party agent
-                  framework can sit a Contender at the table without speaking our REST API directly.
+                  framework can sit a Contender at the table without speaking our REST API directly. Reads are
+                  metered: each call settles a sub-cent x402 nanopayment via Circle Gateway, agent to agent, no
+                  human in the loop.
                 </p>
               </div>
             </div>

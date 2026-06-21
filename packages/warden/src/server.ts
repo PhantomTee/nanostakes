@@ -19,10 +19,22 @@ import {
 } from "./agents.js";
 import { provisionSessionWallet } from "./wallets.js";
 import { startAgentRuntime } from "./runtime.js";
+import { recordMcpPayment, getMcpRevenueStats } from "./mcpRevenue.js";
 import type { Temperament } from "@nanostakes/shared";
 
 interface PaidRequest extends Request {
   payment?: { verified: boolean; payer: string; amount: string; network: string; transaction?: string };
+}
+
+/** Logs a settled nanopayment against a metered MCP-backed route, once the Gateway middleware confirms it. */
+function logMcpPayment(route: string, req: PaidRequest): void {
+  if (!req.payment?.verified || !req.payment.transaction) return;
+  recordMcpPayment({
+    route,
+    payer: req.payment.payer,
+    amountAtomic: BigInt(req.payment.amount),
+    transaction: req.payment.transaction,
+  });
 }
 
 const app = express();
@@ -300,6 +312,54 @@ app.get("/matches", (_req: Request, res: Response) => {
       .map((r) => ({ matchId: r.state.matchId, status: r.status, players: r.state.players }))
       .reverse(),
   );
+});
+
+/**
+ * Metered MCP surface: the same read-only data as the free routes above
+ * (/matches, /match/:id/state, /match/:id/public, /ledger), but priced as
+ * sub-cent x402 nanopayments via the Gateway. This is the resource sold to
+ * agent frameworks over @nanostakes/mcp-server — the free routes above stay
+ * free for the website's own use so this doesn't break the live site.
+ */
+app.get("/mcp/matches", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
+  logMcpPayment("/mcp/matches", req);
+  res.json(
+    allMatches()
+      .map((r) => ({ matchId: r.state.matchId, status: r.status, players: r.state.players }))
+      .reverse(),
+  );
+});
+
+app.get("/mcp/match/:id/state", gateway.require("$0.00001"), (req: PaidRequest, res: Response) => {
+  const viewer = req.query.as as string | undefined;
+  if (!viewer) {
+    res.status(400).json({ error: "?as=<playerAddress> is required" });
+    return;
+  }
+  logMcpPayment("/mcp/match/:id/state", req);
+  res.json(sanitizeForPlayer(getMatch(req.params.id), viewer));
+});
+
+app.get("/mcp/match/:id/public", gateway.require("$0.00001"), (req: PaidRequest, res: Response) => {
+  const record = getMatch(req.params.id);
+  const badges = Object.fromEntries(
+    record.state.players.map((p) => {
+      const ledgerRec = getAgentRecord(p);
+      return [p, { temperament: record.meta?.temperaments?.[p] ?? ledgerRec.temperament, standing: ledgerRec.standing }];
+    }),
+  );
+  logMcpPayment("/mcp/match/:id/public", req);
+  res.json({ ...(sanitizeForSpectator(record) as object), badges });
+});
+
+app.get("/mcp/ledger", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
+  logMcpPayment("/mcp/ledger", req);
+  res.json({ leaderboard: getLeaderboard(), byTemperament: getTemperamentStats() });
+});
+
+/** Traction numbers for the metered MCP surface: total nanopayments, revenue, avg price, unique payers. */
+app.get("/mcp/revenue", (_req: Request, res: Response) => {
+  res.json(getMcpRevenueStats());
 });
 
 app.post("/match/:id/move", async (req: Request, res: Response) => {

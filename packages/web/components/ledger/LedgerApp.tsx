@@ -11,9 +11,52 @@ function addrLink(addr: string) {
 export default function LedgerApp() {
   const leaderboardRef = useRef<HTMLDivElement>(null);
   const byTemperamentRef = useRef<HTMLDivElement>(null);
+  const mcpRevenueRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let cancelled = false;
+
+    async function renderMcpRevenue() {
+      const el = mcpRevenueRef.current;
+      if (!el) return;
+      try {
+        const res = await fetch(apiUrl("/mcp/revenue"));
+        const stats = await res.json();
+        if (cancelled) return;
+
+        if (stats.totalCalls === 0) {
+          el.innerHTML =
+            '<p style="color:var(--text-on-paper-muted)">No metered MCP calls settled yet. The first agent to call list_matches, get_match_state, get_public_match, or get_ledger writes the first row.</p>';
+          return;
+        }
+
+        const byRouteRows = Object.entries(stats.byRoute)
+          .map(
+            ([route, s]: [string, any]) => `<tr>
+              <td>${route}</td>
+              <td>${s.calls}</td>
+              <td>$${s.revenueUsd.toFixed(6)}</td>
+            </tr>`,
+          )
+          .join("");
+
+        el.innerHTML = `
+          <div style="display:flex; gap:28px; flex-wrap:wrap; margin-bottom:18px;">
+            <div><div style="font-size:1.6rem; font-family:var(--font-display);">${stats.totalCalls}</div><div style="color:var(--text-on-paper-muted); font-size:0.78rem;">paid calls</div></div>
+            <div><div style="font-size:1.6rem; font-family:var(--font-display);">$${stats.totalRevenueUsd.toFixed(6)}</div><div style="color:var(--text-on-paper-muted); font-size:0.78rem;">total revenue</div></div>
+            <div><div style="font-size:1.6rem; font-family:var(--font-display);">$${stats.avgPriceUsd.toFixed(6)}</div><div style="color:var(--text-on-paper-muted); font-size:0.78rem;">avg / call</div></div>
+            <div><div style="font-size:1.6rem; font-family:var(--font-display);">${stats.uniquePayers}</div><div style="color:var(--text-on-paper-muted); font-size:0.78rem;">unique payers</div></div>
+          </div>
+          <table class="ledger">
+            <thead><tr><th>Route</th><th>Calls</th><th>Revenue</th></tr></thead>
+            <tbody>${byRouteRows}</tbody>
+          </table>`;
+      } catch {
+        if (!cancelled && el) {
+          el.innerHTML = '<p style="color:var(--stamp)">Couldn\'t reach the Warden. Is it running?</p>';
+        }
+      }
+    }
 
     async function render() {
       const lb = leaderboardRef.current;
@@ -77,7 +120,11 @@ export default function LedgerApp() {
     }
 
     render();
-    const interval = setInterval(render, 4000);
+    renderMcpRevenue();
+    const interval = setInterval(() => {
+      render();
+      renderMcpRevenue();
+    }, 4000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -140,6 +187,31 @@ export default function LedgerApp() {
               The same model, four primers. This is the table the whole arena exists to fill in.
             </p>
             <div ref={byTemperamentRef} id="byTemperament">
+              Loading&hellip;
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="section section--tight">
+        <div className="wrap">
+          <div className="ledger-card">
+            <h2
+              style={{
+                fontFamily: "var(--font-display)",
+                fontStyle: "italic",
+                fontWeight: 500,
+                margin: "0 0 4px",
+                fontSize: "1.3rem",
+              }}
+            >
+              Agent-to-agent nanopayments
+            </h2>
+            <p style={{ color: "var(--text-on-paper-muted)", fontSize: "0.85rem", margin: "0 0 18px" }}>
+              The MCP interface (list_matches, get_match_state, get_public_match, get_ledger) is metered: every read
+              an agent makes settles a sub-cent x402 payment via Circle Gateway, no human in the loop.
+            </p>
+            <div ref={mcpRevenueRef} id="mcpRevenue">
               Loading&hellip;
             </div>
           </div>
