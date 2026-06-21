@@ -117,3 +117,55 @@ Concourse live dashboard (SSE event feed, Temperament/Standing badges, live USDC
 
 4. **Broker mechanic — phase-2-only, but the phase-1 engine interface is already N-player-shaped.**
    A working 2-agent stake→play→settle loop is a complete, demoable artifact on its own; a half-built 3-agent Broker system bolted onto an unproven core risks shipping neither. Broker behavior structurally needs 3+ live agents and a working reputation/relay-fee market to have a real chance of emerging, so it stays in phase 2. The phase-1 negotiation-message interface is built N-player-capable from the start specifically so that turning on the Broker in phase 2 is a config/registration change, not a rewrite of the Warden or engine.
+
+## 10. What's actually shipped, beyond this original design
+
+This section tracks where the live system diverged from (and went beyond) the phases above.
+
+**Matchmaking, fully autonomous.** `packages/warden/src/matchmaking.ts` runs a blind queue: any
+agent's driver loop (`driveAgentForever`) calls `/queue/join`, and as soon as enough agents are
+waiting the Warden pairs them and creates the match — no human triggers a match. A multi-tenant
+scheduler (`runtime.ts`) keeps exactly one driver running per `ACTIVE` owned agent, so N owners' agents
+all play concurrently inside one Warden process. This is the actual answer to "matchmaking" from §8 —
+it shipped earlier and more completely than originally phased.
+
+**Targeted challenges layered on top of the blind queue** (`packages/warden/src/challenges.ts`). An
+owner can target a specific opponent from a public online roster (`GET /agents/online`) instead of
+only taking whoever the queue draws. The challenged agent's own driver decides accept/decline via a
+deterministic, temperament-based policy (`packages/contender/src/challengePolicy.ts`) — no LLM call
+involved in the decision, so it never stalls a match waiting on inference and costs nothing to
+evaluate. An accepted challenge reuses the blind queue's own assignment-delivery channel, so no
+second polling loop was needed in the driver.
+
+**Cross-chain settlement (CCTP).** Circle's Gateway is itself built on CCTP V2 (burn on source,
+attest, mint on destination) for any cross-chain leg. `POST /agents/:id/withdraw` exposes this
+directly: an owner can cash an agent's winnings out to Base Sepolia, Ethereum Sepolia, or Avalanche
+Fuji instead of only Arc Testnet. Verified live — the burn+attestation leg debits the Arc Gateway
+balance correctly; the mint leg needs the destination wallet to already hold native gas there
+(Circle's documented requirement, not a bug here).
+
+**EURC as a second asset, not a second stake currency.** `packages/warden/src/eurc.ts` adds a real
+EURC balance/withdraw path (Arc Testnet contract `0x89B50855Aa3bE2F677cD6303Cec089B5F319D72a`,
+confirmed against Circle's docs). This is a plain ERC20 transfer, *not* routed through Gateway's x402
+batching — `@circle-fin/x402-batching`'s `BatchEvmScheme`/`GatewayWalletBatched` scheme only knows
+USDC at the protocol level in the installed SDK version. Match stakes therefore still settle in USDC
+only; EURC is something an agent can hold and cash out, not (yet) bet.
+
+**Session key encryption, not Developer-Controlled Wallets.** Agent session private keys are
+encrypted at rest (AES-256-GCM, `packages/warden/src/crypto.ts`) rather than stored as plaintext.
+This is interim hardening, not the real fix. Circle Developer-Controlled Wallets is the correct
+long-term answer (Circle custodies the key; the Warden only ever requests a signature over the API,
+never holds raw key material) — Arc Testnet is a supported chain for that product, and the env vars
+for it (`CIRCLE_API_KEY`, `CIRCLE_ENTITY_SECRET`, `CIRCLE_WALLET_SET_ID`) are already plumbed through
+`wallets.ts`'s `provisionSessionWallet()` with a fallback to a local EOA when they're unset (which is
+why every agent today gets a local EOA). The blocker: `GatewayClient` in the installed
+`@circle-fin/x402-batching` version is hardcoded to sign with a `privateKeyToAccount`-derived local
+account — there's no constructor path for a remote signer. Developer-Controlled Wallets sign via a
+`signTypedData` API call instead of local key material, which is fundamentally incompatible with how
+`GatewayClient` is built today. Using Developer-Controlled Wallets for the parts that actually move
+money (stakes, payouts, MCP nanopayments) would mean bypassing `GatewayClient` entirely and
+hand-rolling `deposit`/`pay`/`withdraw` against the lower-level `BatchEvmScheme` with a custom signer
+that proxies to Circle's API — a real, multi-day rebuild, not a config change. Setup is also gated on
+a one-time manual step only the project owner can do: generating and registering a Circle entity
+secret against their own Circle Developer account (downloads a recovery file that must be kept as
+carefully as the secret itself).
