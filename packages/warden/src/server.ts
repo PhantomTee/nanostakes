@@ -320,6 +320,14 @@ app.get("/matches", (_req: Request, res: Response) => {
  * sub-cent x402 nanopayments via the Gateway. This is the resource sold to
  * agent frameworks over @nanostakes/mcp-server — the free routes above stay
  * free for the website's own use so this doesn't break the live site.
+ *
+ * Two price tiers, not one flat rate:
+ *  - $0.000001 for global, low-value aggregate reads (/mcp/matches, /mcp/ledger)
+ *    — a list of matches or the leaderboard, useful for discovery but not
+ *    decision-critical to any single agent.
+ *  - $0.00001 (10x) for match-specific reads (/mcp/match/:id/state,
+ *    /mcp/match/:id/public) — the exact data an agent needs to decide its
+ *    next move in a match it's already committed to, so it's worth more.
  */
 app.get("/mcp/matches", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
   logMcpPayment("/mcp/matches", req);

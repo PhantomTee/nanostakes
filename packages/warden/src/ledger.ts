@@ -1,11 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import type { Address, Temperament } from "@nanostakes/shared";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "../data");
-const LEDGER_PATH = path.join(DATA_DIR, "ledger.json");
+import { db } from "./db.js";
 
 export interface AgentRecord {
   address: Address;
@@ -20,34 +14,35 @@ export interface AgentRecord {
   netPnl: number;
 }
 
-interface LedgerFile {
-  agents: Record<Address, AgentRecord>;
-}
+const selectAgent = db.prepare("SELECT * FROM ledger_agents WHERE address = ?");
+const upsertAgent = db.prepare(`
+  INSERT INTO ledger_agents (address, temperament, matchesPlayed, wins, losses, ties, totalStaked, totalReturned, netPnl)
+  VALUES (@address, @temperament, @matchesPlayed, @wins, @losses, @ties, @totalStaked, @totalReturned, @netPnl)
+  ON CONFLICT(address) DO UPDATE SET
+    temperament = excluded.temperament,
+    matchesPlayed = excluded.matchesPlayed,
+    wins = excluded.wins,
+    losses = excluded.losses,
+    ties = excluded.ties,
+    totalStaked = excluded.totalStaked,
+    totalReturned = excluded.totalReturned,
+    netPnl = excluded.netPnl
+`);
+const selectAllAgents = db.prepare("SELECT * FROM ledger_agents");
 
-function load(): LedgerFile {
-  if (!existsSync(LEDGER_PATH)) return { agents: {} };
-  return JSON.parse(readFileSync(LEDGER_PATH, "utf8")) as LedgerFile;
-}
-
-function save(ledger: LedgerFile): void {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(LEDGER_PATH, JSON.stringify(ledger, null, 2));
-}
-
-function getOrCreate(ledger: LedgerFile, address: Address): AgentRecord {
-  if (!ledger.agents[address]) {
-    ledger.agents[address] = {
-      address,
-      matchesPlayed: 0,
-      wins: 0,
-      losses: 0,
-      ties: 0,
-      totalStaked: 0,
-      totalReturned: 0,
-      netPnl: 0,
-    };
-  }
-  return ledger.agents[address];
+function getOrCreate(address: Address): AgentRecord {
+  const row = selectAgent.get(address) as AgentRecord | undefined;
+  if (row) return row;
+  return {
+    address,
+    matchesPlayed: 0,
+    wins: 0,
+    losses: 0,
+    ties: 0,
+    totalStaked: 0,
+    totalReturned: 0,
+    netPnl: 0,
+  };
 }
 
 /**
@@ -63,27 +58,29 @@ export function recordMatch(params: {
   temperaments?: Record<Address, Temperament>;
 }): void {
   const { players, staked, returned, temperaments } = params;
-  const ledger = load();
   const pnl: Record<Address, number> = {};
   for (const p of players) pnl[p] = (returned[p] ?? 0) - (staked[p] ?? 0);
 
-  for (const p of players) {
-    const rec = getOrCreate(ledger, p);
-    if (temperaments?.[p]) rec.temperament = temperaments[p];
-    rec.matchesPlayed += 1;
-    rec.totalStaked += staked[p] ?? 0;
-    rec.totalReturned += returned[p] ?? 0;
-    rec.netPnl += pnl[p];
+  const tx = db.transaction(() => {
+    for (const p of players) {
+      const rec = getOrCreate(p);
+      if (temperaments?.[p]) rec.temperament = temperaments[p];
+      rec.matchesPlayed += 1;
+      rec.totalStaked += staked[p] ?? 0;
+      rec.totalReturned += returned[p] ?? 0;
+      rec.netPnl += pnl[p];
 
-    const others = players.filter((q) => q !== p);
-    const beatsAll = others.every((q) => pnl[p] > pnl[q]);
-    const tiesAll = others.every((q) => pnl[p] === pnl[q]);
-    if (beatsAll) rec.wins += 1;
-    else if (tiesAll) rec.ties += 1;
-    else rec.losses += 1;
-  }
+      const others = players.filter((q) => q !== p);
+      const beatsAll = others.every((q) => pnl[p] > pnl[q]);
+      const tiesAll = others.every((q) => pnl[p] === pnl[q]);
+      if (beatsAll) rec.wins += 1;
+      else if (tiesAll) rec.ties += 1;
+      else rec.losses += 1;
 
-  save(ledger);
+      upsertAgent.run({ ...rec, temperament: rec.temperament ?? null });
+    }
+  });
+  tx();
 }
 
 export type Standing = "UNRANKED" | "CONTENDER" | "STEADY" | "ELITE";
@@ -99,16 +96,13 @@ export function standingOf(rec: AgentRecord): Standing {
 
 /** Single-agent lookup for per-match badges — returns UNRANKED standing if the agent has no settled history yet. */
 export function getAgentRecord(address: Address): AgentRecord & { standing: Standing } {
-  const ledger = load();
-  const rec = getOrCreate(ledger, address);
+  const rec = getOrCreate(address);
   return { ...rec, standing: standingOf(rec) };
 }
 
 export function getLeaderboard(): Array<AgentRecord & { standing: Standing }> {
-  const ledger = load();
-  return Object.values(ledger.agents)
-    .map((rec) => ({ ...rec, standing: standingOf(rec) }))
-    .sort((a, b) => b.netPnl - a.netPnl);
+  const rows = selectAllAgents.all() as AgentRecord[];
+  return rows.map((rec) => ({ ...rec, standing: standingOf(rec) })).sort((a, b) => b.netPnl - a.netPnl);
 }
 
 /** Aggregate stats grouped by temperament, across all agents that have played as that temperament. */

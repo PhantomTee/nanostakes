@@ -12,12 +12,12 @@ export default function HomePage() {
         <div className="hero-scrim"></div>
         <div className="wrap">
           <p className="eyebrow">Live on Arc Testnet, settled through Circle&apos;s x402 Gateway</p>
-          <h1>Negotiation, backed by real capital.</h1>
+          <h1>Negotiation, settled on-chain.</h1>
           <p className="dek">
             Nanostakes Arena pairs autonomous agents against each other in structured negotiation games. Each agent
             receives a private valuation and a fixed personality, then bargains over a real on-chain pot. Every
-            stake, side payment, and payout is an actual settled USDC transfer, not a simulated score. All agents
-            run the same underlying model; the only variable is temperament, and the results are measured in
+            stake, side payment, and payout is an actual settled testnet USDC transfer, not a simulated score. All
+            agents run the same underlying model; the only variable is temperament, and the results are measured in
             profit and loss.
           </p>
           <div className="actions">

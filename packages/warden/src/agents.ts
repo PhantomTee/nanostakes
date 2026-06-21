@@ -1,12 +1,6 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import type { Address, Temperament } from "@nanostakes/shared";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = path.join(__dirname, "../data");
-const AGENTS_PATH = path.join(DATA_DIR, "agents.json");
+import { db } from "./db.js";
 
 export type AgentStatus = "FUNDING" | "ACTIVE" | "PAUSED";
 
@@ -24,19 +18,14 @@ export interface OwnedAgent {
   createdAt: string;
 }
 
-interface AgentsFile {
-  agents: Record<string, OwnedAgent>;
-}
-
-function load(): AgentsFile {
-  if (!existsSync(AGENTS_PATH)) return { agents: {} };
-  return JSON.parse(readFileSync(AGENTS_PATH, "utf8")) as AgentsFile;
-}
-
-function save(file: AgentsFile): void {
-  if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(AGENTS_PATH, JSON.stringify(file, null, 2));
-}
+const insertAgent = db.prepare(`
+  INSERT INTO owned_agents (id, ownerWallet, name, temperament, sessionAddress, sessionPrivateKey, walletProvider, status, createdAt)
+  VALUES (@id, @ownerWallet, @name, @temperament, @sessionAddress, @sessionPrivateKey, @walletProvider, @status, @createdAt)
+`);
+const selectAgentById = db.prepare("SELECT * FROM owned_agents WHERE id = ?");
+const selectAgentsByOwner = db.prepare("SELECT * FROM owned_agents WHERE ownerWallet = ? COLLATE NOCASE");
+const selectActiveAgents = db.prepare("SELECT * FROM owned_agents WHERE status = 'ACTIVE'");
+const updateStatus = db.prepare("UPDATE owned_agents SET status = ? WHERE id = ?");
 
 export function createAgent(params: {
   ownerWallet: Address;
@@ -46,39 +35,33 @@ export function createAgent(params: {
   sessionPrivateKey: string;
   walletProvider: "circle" | "local";
 }): OwnedAgent {
-  const file = load();
   const agent: OwnedAgent = {
     id: randomUUID(),
     status: "FUNDING",
     createdAt: new Date().toISOString(),
     ...params,
   };
-  file.agents[agent.id] = agent;
-  save(file);
+  insertAgent.run(agent);
   return agent;
 }
 
 export function getAgent(id: string): OwnedAgent | undefined {
-  return load().agents[id];
+  return selectAgentById.get(id) as OwnedAgent | undefined;
 }
 
 export function listAgentsByOwner(ownerWallet: Address): OwnedAgent[] {
-  return Object.values(load().agents).filter(
-    (a) => a.ownerWallet.toLowerCase() === ownerWallet.toLowerCase(),
-  );
+  return selectAgentsByOwner.all(ownerWallet) as OwnedAgent[];
 }
 
 export function listActiveAgents(): OwnedAgent[] {
-  return Object.values(load().agents).filter((a) => a.status === "ACTIVE");
+  return selectActiveAgents.all() as OwnedAgent[];
 }
 
 export function setAgentStatus(id: string, status: AgentStatus): OwnedAgent {
-  const file = load();
-  const agent = file.agents[id];
+  const agent = getAgent(id);
   if (!agent) throw new Error(`unknown agent: ${id}`);
-  agent.status = status;
-  save(file);
-  return agent;
+  updateStatus.run(status, id);
+  return { ...agent, status };
 }
 
 /** Strips the session private key before sending an agent over the wire. */
