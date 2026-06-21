@@ -100,6 +100,13 @@ async function playMatch(
       log(`${agent.name} match ${matchId} settled`);
       return;
     }
+    if (state.status !== "ACTIVE") {
+      // Still AWAITING_STAKES: this player staked already but the opponent
+      // hasn't yet, so there's nothing to act on — posting a move now would
+      // 409 ("match is not active"). Wait for the opponent's stake to land.
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
     if (state.acted[me]) {
       await sleep(POLL_INTERVAL_MS);
       continue;
