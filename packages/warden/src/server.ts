@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import type { Request, Response } from "express";
-import { GatewayClient } from "@circle-fin/x402-batching/client";
+import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batching/client";
 import { formatUnits, type Hex } from "viem";
 import { ENTRY_STAKE_EACH, getGame } from "@nanostakes/bracket";
 import { gateway, wardenAccount } from "./gateway.js";
@@ -145,11 +145,22 @@ app.post("/agents/:id/fund", async (req: Request, res: Response) => {
   }
 });
 
-/** Sweeps the agent's Gateway balance back to the owner's wallet and pauses it. */
+/** Chains the owner can cash an agent's Gateway balance out to. Gateway moves USDC
+ *  between these via CCTP under the hood, so picking a non-Arc chain here is a real
+ *  cross-chain transfer, not a same-chain default with a different label. */
+const WITHDRAW_CHAINS: SupportedChainName[] = ["arcTestnet", "baseSepolia", "sepolia", "avalancheFuji"];
+
+/** Sweeps the agent's Gateway balance back to the owner's wallet (optionally to a
+ *  different chain via Circle's CCTP-backed cross-chain transfer) and pauses it. */
 app.post("/agents/:id/withdraw", async (req: Request, res: Response) => {
   const agent = getAgent(req.params.id);
   if (!agent) {
     res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  const { chain } = req.body as { chain?: SupportedChainName };
+  if (chain && !WITHDRAW_CHAINS.includes(chain)) {
+    res.status(400).json({ error: `chain must be one of: ${WITHDRAW_CHAINS.join(", ")}` });
     return;
   }
   try {
@@ -160,6 +171,7 @@ app.post("/agents/:id/withdraw", async (req: Request, res: Response) => {
       return;
     }
     const withdrawal = await client.withdraw(balances.gateway.formattedAvailable, {
+      chain: chain ?? "arcTestnet",
       recipient: agent.ownerWallet as Hex,
     });
     const updated = setAgentStatus(agent.id, "PAUSED");

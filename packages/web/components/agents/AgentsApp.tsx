@@ -19,6 +19,15 @@ interface OwnedAgent {
 
 const TEMPERAMENTS: Temperament[] = ["STRATEGIC", "COMPETITIVE", "COOPERATIVE", "NEUTRAL"];
 
+/** Withdraw destinations. Gateway moves USDC between these via Circle's CCTP under
+ *  the hood, so picking anything other than Arc Testnet is a real cross-chain transfer. */
+const WITHDRAW_CHAINS: { value: string; label: string }[] = [
+  { value: "arcTestnet", label: "Arc Testnet (same chain)" },
+  { value: "baseSepolia", label: "Base Sepolia" },
+  { value: "sepolia", label: "Ethereum Sepolia" },
+  { value: "avalancheFuji", label: "Avalanche Fuji" },
+];
+
 export default function AgentsApp() {
   const { address: owner, connecting, error: connectError, connect } = useWallet();
   const [agents, setAgents] = useState<OwnedAgent[]>([]);
@@ -27,6 +36,7 @@ export default function AgentsApp() {
   const [creating, setCreating] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [withdrawChain, setWithdrawChain] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async (ownerAddr: string) => {
     const res = await fetch(apiUrl(`/agents?owner=${ownerAddr}`));
@@ -71,7 +81,11 @@ export default function AgentsApp() {
     setBusyId(agentId);
     setActionError(null);
     try {
-      const res = await fetch(apiUrl(`/agents/${agentId}/${action}`), { method: "POST" });
+      const body = action === "withdraw" ? { chain: withdrawChain[agentId] || "arcTestnet" } : undefined;
+      const res = await fetch(apiUrl(`/agents/${agentId}/${action}`), {
+        method: "POST",
+        ...(body ? { headers: { "content-type": "application/json" }, body: JSON.stringify(body) } : {}),
+      });
       if (!res.ok) {
         const { error } = await res.json();
         throw new Error(error ?? `Could not ${action} this agent.`);
@@ -205,6 +219,18 @@ export default function AgentsApp() {
                             Resume
                           </button>
                         ) : null}
+                        <select
+                          value={withdrawChain[agent.id] ?? "arcTestnet"}
+                          onChange={(e) => setWithdrawChain((prev) => ({ ...prev, [agent.id]: e.target.value }))}
+                          style={{ fontSize: "0.78rem" }}
+                          title="Destination chain — Gateway moves USDC there via Circle's CCTP. Non-Arc destinations need the owner wallet to already hold a little native gas on that chain."
+                        >
+                          {WITHDRAW_CHAINS.map((c) => (
+                            <option key={c.value} value={c.value}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
                         <button
                           className="btn btn--ghost"
                           type="button"
