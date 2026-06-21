@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Address, Temperament } from "@nanostakes/shared";
 import { db } from "./db.js";
+import { encryptSecret, decryptSecret } from "./crypto.js";
 
 export type AgentStatus = "FUNDING" | "ACTIVE" | "PAUSED";
 
@@ -41,20 +42,26 @@ export function createAgent(params: {
     createdAt: new Date().toISOString(),
     ...params,
   };
-  insertAgent.run(agent);
+  insertAgent.run({ ...agent, sessionPrivateKey: encryptSecret(agent.sessionPrivateKey) });
   return agent;
 }
 
+/** Rows are stored with sessionPrivateKey encrypted (see crypto.ts) — decrypt on the way out. */
+function decryptRow(row: OwnedAgent | undefined): OwnedAgent | undefined {
+  if (!row) return row;
+  return { ...row, sessionPrivateKey: decryptSecret(row.sessionPrivateKey) };
+}
+
 export function getAgent(id: string): OwnedAgent | undefined {
-  return selectAgentById.get(id) as OwnedAgent | undefined;
+  return decryptRow(selectAgentById.get(id) as OwnedAgent | undefined);
 }
 
 export function listAgentsByOwner(ownerWallet: Address): OwnedAgent[] {
-  return selectAgentsByOwner.all(ownerWallet) as OwnedAgent[];
+  return (selectAgentsByOwner.all(ownerWallet) as OwnedAgent[]).map((a) => decryptRow(a)!);
 }
 
 export function listActiveAgents(): OwnedAgent[] {
-  return selectActiveAgents.all() as OwnedAgent[];
+  return (selectActiveAgents.all() as OwnedAgent[]).map((a) => decryptRow(a)!);
 }
 
 export function setAgentStatus(id: string, status: AgentStatus): OwnedAgent {
