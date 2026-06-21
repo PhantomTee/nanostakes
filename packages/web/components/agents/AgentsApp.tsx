@@ -47,13 +47,39 @@ export default function AgentsApp() {
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [challengeTarget, setChallengeTarget] = useState<Record<string, string>>({});
   const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
+  const [eurcBalances, setEurcBalances] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async (ownerAddr: string) => {
     const res = await fetch(apiUrl(`/agents?owner=${ownerAddr}`));
     if (!res.ok) return;
-    const { agents: list } = await res.json();
+    const { agents: list } = (await res.json()) as { agents: OwnedAgent[] };
     setAgents(list);
+    for (const a of list) {
+      fetch(apiUrl(`/agents/${a.id}/eurc-balance`))
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data) setEurcBalances((prev) => ({ ...prev, [a.id]: data.balance }));
+        })
+        .catch(() => {});
+    }
   }, []);
+
+  async function withdrawEurc(agentId: string) {
+    setBusyId(agentId);
+    setActionError(null);
+    try {
+      const res = await fetch(apiUrl(`/agents/${agentId}/withdraw-eurc`), { method: "POST" });
+      if (!res.ok) {
+        const { error } = await res.json();
+        throw new Error(error ?? "Could not withdraw EURC.");
+      }
+      setEurcBalances((prev) => ({ ...prev, [agentId]: "0" }));
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   useEffect(() => {
     async function loadOnline() {
@@ -223,6 +249,20 @@ export default function AgentsApp() {
                       <div className="addr" style={{ marginTop: 8 }}>
                         Session wallet: {agent.sessionAddress}
                       </div>
+                      {Number(eurcBalances[agent.id] ?? "0") > 0 ? (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, fontSize: "0.78rem", color: "var(--text-muted)" }}>
+                          <span>EURC balance: {eurcBalances[agent.id]}</span>
+                          <button
+                            className="btn btn--ghost"
+                            type="button"
+                            disabled={busyId === agent.id}
+                            onClick={() => withdrawEurc(agent.id)}
+                            style={{ padding: "2px 10px", fontSize: "0.72rem" }}
+                          >
+                            Withdraw EURC
+                          </button>
+                        </div>
+                      ) : null}
                       <p style={{ color: "var(--text-muted)", fontSize: "0.78rem", margin: "8px 0" }}>
                         {agent.status === "FUNDING"
                           ? "Send testnet USDC to the session wallet above, then click Fund."

@@ -20,6 +20,7 @@ import {
   toPublicAgent,
 } from "./agents.js";
 import { provisionSessionWallet } from "./wallets.js";
+import { getEurcBalance, withdrawEurc } from "./eurc.js";
 import { startAgentRuntime } from "./runtime.js";
 import { recordMcpPayment, getMcpRevenueStats } from "./mcpRevenue.js";
 import type { Address, Temperament } from "@nanostakes/shared";
@@ -196,6 +197,45 @@ app.post("/agents/:id/withdraw", async (req: Request, res: Response) => {
       agent: toPublicAgent(updated),
       withdrawal: { ...withdrawal, amount: withdrawal.amount.toString() },
     });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * EURC balance for an agent's session wallet. Separate from the USDC/Gateway
+ * balance above — EURC isn't routed through Gateway batching (the installed
+ * x402-batching SDK only knows USDC at the protocol level), so this is a
+ * plain on-chain ERC20 balance, not a Gateway unified balance.
+ */
+app.get("/agents/:id/eurc-balance", async (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  try {
+    const balance = await getEurcBalance(agent.sessionAddress as Hex);
+    res.json({ balance: balance.formatted });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/** Sweeps the agent's EURC balance to the owner's wallet as a plain ERC20 transfer (same chain only). */
+app.post("/agents/:id/withdraw-eurc", async (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  try {
+    const result = await withdrawEurc(agent.sessionPrivateKey as Hex, agent.ownerWallet as Hex);
+    if (!result) {
+      res.status(409).json({ error: "nothing to withdraw" });
+      return;
+    }
+    res.json({ withdrawal: result });
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
