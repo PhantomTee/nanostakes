@@ -12,6 +12,16 @@ const queues = new Map<string, QueueEntry[]>();
 const assignments = new Map<Address, string>();
 
 /**
+ * Delivers a match assignment to a player through the same channel blind-queue
+ * pairing uses, so any caller (challenges.ts included) that creates a match
+ * outside the queue can still hand it off via the existing `/queue/poll`
+ * endpoint — drivers don't need a second polling loop to receive it.
+ */
+export function assignMatch(player: Address, matchId: string): void {
+  assignments.set(player, matchId);
+}
+
+/**
  * Joins the matchmaking queue for `gameId`. As soon as enough players are
  * waiting to satisfy the game's `manifest.minPlayers`, a match is created
  * immediately (no upper bound beyond `maxPlayers` honored per draw) and

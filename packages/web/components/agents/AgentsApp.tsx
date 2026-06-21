@@ -17,6 +17,13 @@ interface OwnedAgent {
   createdAt: string;
 }
 
+interface OnlineAgent {
+  id: string;
+  name: string;
+  sessionAddress: string;
+  temperament: Temperament;
+}
+
 const TEMPERAMENTS: Temperament[] = ["STRATEGIC", "COMPETITIVE", "COOPERATIVE", "NEUTRAL"];
 
 /** Withdraw destinations. Gateway moves USDC between these via Circle's CCTP under
@@ -37,6 +44,9 @@ export default function AgentsApp() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [withdrawChain, setWithdrawChain] = useState<Record<string, string>>({});
+  const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
+  const [challengeTarget, setChallengeTarget] = useState<Record<string, string>>({});
+  const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
 
   const refresh = useCallback(async (ownerAddr: string) => {
     const res = await fetch(apiUrl(`/agents?owner=${ownerAddr}`));
@@ -44,6 +54,38 @@ export default function AgentsApp() {
     const { agents: list } = await res.json();
     setAgents(list);
   }, []);
+
+  useEffect(() => {
+    async function loadOnline() {
+      const res = await fetch(apiUrl("/agents/online"));
+      if (!res.ok) return;
+      const { agents: list } = await res.json();
+      setOnlineAgents(list);
+    }
+    loadOnline();
+    const interval = setInterval(loadOnline, 6000);
+    return () => clearInterval(interval);
+  }, []);
+
+  async function sendChallenge(agent: OwnedAgent) {
+    const target = challengeTarget[agent.id];
+    if (!target) return;
+    setChallengeMsg(null);
+    try {
+      const res = await fetch(apiUrl("/challenges"), {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ gameId: "brinkmanship", from: agent.sessionAddress, to: target }),
+      });
+      if (!res.ok) {
+        const { error } = await res.json();
+        throw new Error(error ?? "Could not send challenge.");
+      }
+      setChallengeMsg(`${agent.name} challenged ${target.slice(0, 8)}… — waiting on their decision.`);
+    } catch (err) {
+      setChallengeMsg((err as Error).message);
+    }
+  }
 
   useEffect(() => {
     if (!owner) return;
@@ -240,10 +282,37 @@ export default function AgentsApp() {
                           Withdraw
                         </button>
                       </div>
+                      {agent.status === "ACTIVE" ? (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                          <select
+                            value={challengeTarget[agent.id] ?? ""}
+                            onChange={(e) => setChallengeTarget((prev) => ({ ...prev, [agent.id]: e.target.value }))}
+                            style={{ fontSize: "0.78rem", flex: "1 1 160px" }}
+                          >
+                            <option value="">Challenge a specific agent…</option>
+                            {onlineAgents
+                              .filter((o) => o.sessionAddress.toLowerCase() !== agent.sessionAddress.toLowerCase())
+                              .map((o) => (
+                                <option key={o.id} value={o.sessionAddress}>
+                                  {o.name} ({o.temperament})
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            className="btn btn--ghost"
+                            type="button"
+                            disabled={!challengeTarget[agent.id]}
+                            onClick={() => sendChallenge(agent)}
+                          >
+                            Challenge
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
               )}
+              {challengeMsg ? <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginTop: 14 }}>{challengeMsg}</p> : null}
             </>
           )}
         </div>

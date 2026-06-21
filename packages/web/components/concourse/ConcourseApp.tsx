@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiUrl } from "@/lib/api";
 
 const EXPLORER_TX_BASE = "https://testnet.arcscan.app/tx/";
@@ -15,6 +15,78 @@ function txLink(hash?: string) {
 }
 function addrLink(addr: string) {
   return `<a class="tx-link" href="${EXPLORER_ADDR_BASE}${addr}" target="_blank" rel="noopener">${addr}</a>`;
+}
+
+interface OnlineAgent {
+  id: string;
+  name: string;
+  temperament: string;
+  sessionAddress: string;
+  standing: "ELITE" | "STEADY" | "CONTENDER" | "UNRANKED";
+  matchesPlayed: number;
+  netPnl: number;
+}
+
+/** Who's actually waiting in the queue right now — the roster a challenge would target. */
+function OnlineAgents() {
+  const [agents, setAgents] = useState<OnlineAgent[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch(apiUrl("/agents/online"));
+        if (!res.ok || cancelled) return;
+        const { agents: list } = await res.json();
+        if (!cancelled) setAgents(list);
+      } catch {
+        /* transient — next poll will retry */
+      }
+    }
+    load();
+    const interval = setInterval(load, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  return (
+    <section className="section--tight">
+      <div className="wrap">
+        <p className="eyebrow" style={{ marginBottom: 10 }}>
+          Agents online ({agents.length})
+        </p>
+        {agents.length === 0 ? (
+          <p style={{ color: "var(--text-muted)" }}>No agents are queued right now.</p>
+        ) : (
+          <div className="player-grid">
+            {agents.map((a) => (
+              <div key={a.id} className="player-ticket">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                  <strong>{a.name}</strong>
+                  <span className={`seal on-ink--${a.standing}`}>{a.standing}</span>
+                </div>
+                <div className="badges">
+                  <span className="seal on-ink--STEADY" style={{ borderColor: "#5a5440", color: "#b8a8f0" }}>
+                    {a.temperament}
+                  </span>
+                </div>
+                <div className="addr" style={{ marginTop: 8 }}>
+                  {a.sessionAddress}
+                </div>
+                <p style={{ color: "var(--text-muted)", fontSize: "0.78rem", margin: "8px 0 0" }}>
+                  {a.matchesPlayed} match{a.matchesPlayed === 1 ? "" : "es"} played &middot; net{" "}
+                  {a.netPnl >= 0 ? "+" : ""}
+                  {a.netPnl.toFixed(2)} USDC
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export default function ConcourseApp() {
@@ -257,6 +329,8 @@ export default function ConcourseApp() {
           </p>
         </div>
       </section>
+
+      <OnlineAgents />
 
       <section className="section--tight">
         <div className="wrap">

@@ -2,6 +2,7 @@ import { GatewayClient } from "@circle-fin/x402-batching/client";
 import type { Hex } from "viem";
 import type { Temperament } from "@nanostakes/shared";
 import { TemperamentAgent, type AgentProviders } from "./agent.js";
+import { shouldAcceptChallenge, type OpponentRecord } from "./challengePolicy.js";
 
 export interface DriveAgentOptions {
   wardenUrl: string;
@@ -54,6 +55,29 @@ async function postMove(wardenUrl: string, matchId: string, player: string, move
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Checks for incoming challenges and decides each one by temperament policy
+ * (see challengePolicy.ts) — no LLM call, so this never stalls and is free
+ * to run on every poll tick. Declines or accepts every pending challenge it
+ * sees; accepting hands the matchId to both sides via the Warden's existing
+ * queue-assignment channel, so the normal queue.join/poll loop picks it up.
+ */
+async function resolveIncomingChallenges(wardenUrl: string, me: string, temperament: Temperament, log: (m: string) => void): Promise<void> {
+  const res = await fetch(`${wardenUrl}/challenges?player=${me}`);
+  if (!res.ok) return;
+  const { incoming } = (await res.json()) as { incoming: Array<{ id: string; from: string; fromRecord: OpponentRecord }> };
+
+  for (const challenge of incoming) {
+    const accept = shouldAcceptChallenge(temperament, challenge.fromRecord);
+    await fetch(`${wardenUrl}/challenges/${challenge.id}/respond`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ responder: me, accept }),
+    });
+    log(`${accept ? "accepted" : "declined"} challenge from ${challenge.from}`);
+  }
 }
 
 /** Plays one already-staked, already-assigned match to completion, acting only on this agent's own turns. */
@@ -149,6 +173,7 @@ export async function driveAgentForever(opts: DriveAgentOptions): Promise<void> 
 
     while (!matchId && !isStopped?.()) {
       await sleep(POLL_INTERVAL_MS * 2);
+      await resolveIncomingChallenges(wardenUrl, client.address, opts.temperament, log);
       const poll = await fetch(`${wardenUrl}/queue/poll?player=${client.address}`);
       if (!poll.ok) throw new Error(`queue/poll failed: ${poll.status} ${await poll.text()}`);
       ({ matchId } = (await poll.json()) as { matchId?: string });

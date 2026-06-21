@@ -9,18 +9,20 @@ import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpecta
 import { settleMatch } from "./settle.js";
 import { getLeaderboard, getTemperamentStats, getAgentRecord } from "./ledger.js";
 import { joinQueue, pollAssignment, queueStatus } from "./matchmaking.js";
+import { createChallenge, listChallenges, respondToChallenge } from "./challenges.js";
 import { emitConcourseEvent, subscribeConcourse } from "./events.js";
 import {
   createAgent,
   getAgent,
   listAgentsByOwner,
+  listActiveAgents,
   setAgentStatus,
   toPublicAgent,
 } from "./agents.js";
 import { provisionSessionWallet } from "./wallets.js";
 import { startAgentRuntime } from "./runtime.js";
 import { recordMcpPayment, getMcpRevenueStats } from "./mcpRevenue.js";
-import type { Temperament } from "@nanostakes/shared";
+import type { Address, Temperament } from "@nanostakes/shared";
 
 interface PaidRequest extends Request {
   payment?: { verified: boolean; payer: string; amount: string; network: string; transaction?: string };
@@ -97,6 +99,21 @@ app.get("/agents", (req: Request, res: Response) => {
     return;
   }
   res.json({ agents: listAgentsByOwner(owner).map(toPublicAgent) });
+});
+
+/**
+ * Public roster of every ACTIVE agent across all owners — the "who's online"
+ * list the queue UI shows so an owner can target a specific opponent with a
+ * challenge instead of only taking whoever the blind queue draws.
+ *
+ * Registered before `/agents/:id` so "online" isn't swallowed as an id param.
+ */
+app.get("/agents/online", (_req: Request, res: Response) => {
+  const onlineAgents = listActiveAgents().map((a) => {
+    const rec = getAgentRecord(a.sessionAddress);
+    return { ...toPublicAgent(a), standing: rec.standing, matchesPlayed: rec.matchesPlayed, netPnl: rec.netPnl };
+  });
+  res.json({ agents: onlineAgents });
 });
 
 app.get("/agents/:id", (req: Request, res: Response) => {
@@ -200,6 +217,58 @@ app.post("/agents/:id/resume", (req: Request, res: Response) => {
     return;
   }
   res.json({ agent: toPublicAgent(setAgentStatus(agent.id, "ACTIVE")) });
+});
+
+/**
+ * Targeted challenges: an owner picks a specific opponent from the online
+ * roster instead of the blind queue drawing one. The opponent's own driver
+ * (see @nanostakes/contender's challenge-polling loop) decides accept/decline
+ * by a temperament-based policy — no human in the loop on either side.
+ */
+app.post("/challenges", (req: Request, res: Response) => {
+  const { gameId, from, to } = req.body as { gameId?: string; from?: Address; to?: Address };
+  if (!gameId || !from || !to) {
+    res.status(400).json({ error: "gameId, from, and to are required" });
+    return;
+  }
+  try {
+    const challenge = createChallenge(gameId, from, to);
+    res.json({ challenge });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
+});
+
+/**
+ * Incoming (to decide on) and outgoing (to track) challenges for a player.
+ * Incoming challenges carry the challenger's ledger record so the responder's
+ * accept/decline policy can decide without a second round-trip.
+ */
+app.get("/challenges", (req: Request, res: Response) => {
+  const player = req.query.player as Address | undefined;
+  if (!player) {
+    res.status(400).json({ error: "?player=<address> is required" });
+    return;
+  }
+  const { incoming, outgoing } = listChallenges(player);
+  res.json({
+    incoming: incoming.map((c) => ({ ...c, fromRecord: getAgentRecord(c.from) })),
+    outgoing,
+  });
+});
+
+app.post("/challenges/:id/respond", (req: Request, res: Response) => {
+  const { responder, accept } = req.body as { responder?: Address; accept?: boolean };
+  if (!responder || typeof accept !== "boolean") {
+    res.status(400).json({ error: "responder and accept (boolean) are required" });
+    return;
+  }
+  try {
+    const challenge = respondToChallenge(req.params.id, responder, accept);
+    res.json({ challenge });
+  } catch (err) {
+    res.status(400).json({ error: (err as Error).message });
+  }
 });
 
 /** Create a new match. No payment required — payment happens at /stake. */
