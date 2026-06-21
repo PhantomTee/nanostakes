@@ -80,11 +80,19 @@ h1, h2, h3 {
   display: inline-block; width: 0.85em; height: 0.85em; object-fit: contain;
   vertical-align: -0.1em; margin: 0 0.05em; border-radius: 50%;
 }
-.checker-stack { display: flex; gap: 12px; height: 100%; min-height: 220px; }
+.checker-stack { display: flex; gap: 12px; height: 100%; min-height: 220px; overflow: hidden; }
 .checker-stack span {
-  flex: 1; border: 2px solid var(--ink); border-radius: 4px;
+  flex: 1; border: 2px solid var(--ink); border-radius: 4px; overflow: hidden;
   background-image: conic-gradient(var(--ink) 90deg, transparent 90deg 180deg, var(--ink) 180deg 270deg, transparent 270deg);
   background-size: 26px 26px;
+  animation: checker-scroll 2.4s linear infinite;
+}
+@keyframes checker-scroll {
+  from { background-position: 0 0; }
+  to { background-position: 0 -52px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .checker-stack span { animation: none; }
 }
 @media (max-width: 900px) { .checker-stack { display: none; } }
 
