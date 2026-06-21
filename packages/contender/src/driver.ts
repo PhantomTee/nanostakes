@@ -57,6 +57,40 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const STAKE_RETRY_ATTEMPTS = 24;
+const STAKE_RETRY_DELAY_MS = 5000;
+
+/**
+ * Circle Gateway settles payments in batches (see Warden's settle.ts), so a
+ * payout from the match an agent just finished may not be available yet by
+ * the time it immediately stakes into the next one. A single failed stake
+ * payment used to propagate straight up and count as a driver crash —
+ * three of those in a row auto-paused the agent even though it had funds,
+ * just not yet settled. Retry instead, on the same budget settle.ts itself
+ * waits on (120s) before giving up for real.
+ */
+async function payStakeWithRetry(
+  client: GatewayClient,
+  url: string,
+  log: (m: string) => void,
+): Promise<Awaited<ReturnType<GatewayClient["pay"]>>> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= STAKE_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await client.pay(url, { method: "POST" });
+    } catch (err) {
+      lastErr = err;
+      if (attempt < STAKE_RETRY_ATTEMPTS) {
+        log(
+          `stake payment attempt ${attempt}/${STAKE_RETRY_ATTEMPTS} failed (${(err as Error).message}) — a prior payout may still be settling, retrying in ${STAKE_RETRY_DELAY_MS / 1000}s`,
+        );
+        await sleep(STAKE_RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Checks for incoming challenges and decides each one by temperament policy
  * (see challengePolicy.ts) — no LLM call, so this never stalls and is free
@@ -91,7 +125,7 @@ async function playMatch(
   const me = client.address;
   const log = onEvent ?? (() => {});
 
-  const stakePayment = await client.pay(`${wardenUrl}/match/${matchId}/stake`, { method: "POST" });
+  const stakePayment = await payStakeWithRetry(client, `${wardenUrl}/match/${matchId}/stake`, log);
   log(`${agent.name} staked entry for match ${matchId} (${stakePayment.transaction})`);
 
   while (!isStopped?.()) {
