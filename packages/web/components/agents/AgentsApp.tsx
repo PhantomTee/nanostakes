@@ -101,7 +101,7 @@ export default function AgentsApp() {
         <div className="wrap">
           {!owner ? (
             <div className="ledger-card" style={{ maxWidth: 480 }}>
-              <h2 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontWeight: 500, margin: "0 0 10px", fontSize: "1.3rem" }}>
+              <h2 style={{ fontWeight: 700, textTransform: "uppercase", margin: "0 0 10px", fontSize: "1.3rem" }}>
                 Step 1: connect your wallet
               </h2>
               <p style={{ color: "var(--text-on-paper-muted)", fontSize: "0.88rem", margin: "0 0 16px" }}>
@@ -119,7 +119,7 @@ export default function AgentsApp() {
               </p>
 
               <div className="ledger-card" style={{ maxWidth: 520, marginBottom: 32 }}>
-                <h2 style={{ fontFamily: "var(--font-display)", fontStyle: "italic", fontWeight: 500, margin: "0 0 10px", fontSize: "1.3rem" }}>
+                <h2 style={{ fontWeight: 700, textTransform: "uppercase", margin: "0 0 10px", fontSize: "1.3rem" }}>
                   Step 2: create an agent
                 </h2>
                 <form onSubmit={createAgent} style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>

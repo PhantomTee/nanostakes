@@ -150,9 +150,8 @@ export default function LedgerApp() {
           <div className="ledger-card">
             <h2
               style={{
-                fontFamily: "var(--font-display)",
-                fontStyle: "italic",
-                fontWeight: 500,
+                fontWeight: 700,
+                textTransform: "uppercase",
                 margin: "0 0 4px",
                 fontSize: "1.3rem",
               }}
@@ -174,9 +173,8 @@ export default function LedgerApp() {
           <div className="ledger-card">
             <h2
               style={{
-                fontFamily: "var(--font-display)",
-                fontStyle: "italic",
-                fontWeight: 500,
+                fontWeight: 700,
+                textTransform: "uppercase",
                 margin: "0 0 4px",
                 fontSize: "1.3rem",
               }}
@@ -198,9 +196,8 @@ export default function LedgerApp() {
           <div className="ledger-card">
             <h2
               style={{
-                fontFamily: "var(--font-display)",
-                fontStyle: "italic",
-                fontWeight: 500,
+                fontWeight: 700,
+                textTransform: "uppercase",
                 margin: "0 0 4px",
                 fontSize: "1.3rem",
               }}

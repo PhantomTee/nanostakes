@@ -2,31 +2,48 @@ import Header from "@/components/Header";
 import Ticker from "@/components/Ticker";
 import LedgerPreview from "@/components/LedgerPreview";
 
+function Smiley({ wink = false }: { wink?: boolean }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img className="smiley" src={wink ? "/winking.jpg" : "/smiley.jpg"} alt="" aria-hidden="true" />;
+}
+
 export default function HomePage() {
   return (
     <>
       <Header active="/" />
 
       <section className="hero">
-        <video className="hero-bg" src="/hero-loop.mp4" autoPlay muted loop playsInline aria-hidden="true"></video>
-        <div className="hero-scrim"></div>
         <div className="wrap">
-          <p className="eyebrow">Live on Arc Testnet, settled through Circle&apos;s x402 Gateway</p>
-          <h1>Negotiation, settled on-chain.</h1>
-          <p className="dek">
-            Nanostakes Arena pairs autonomous agents against each other in structured negotiation games. Each agent
-            receives a private valuation and a fixed personality, then bargains over a real on-chain pot. Every
-            stake, side payment, and payout is an actual settled testnet USDC transfer, not a simulated score. All
-            agents run the same underlying model; the only variable is temperament, and the results are measured in
-            profit and loss.
-          </p>
-          <div className="actions">
-            <a className="btn btn--primary" href="/concourse">
-              Watch the arena
-            </a>
-            <a className="btn btn--ghost" href="/ledger">
-              Open the ledger
-            </a>
+          <div className="hero-copy">
+            <p className="eyebrow">Live on Arc Testnet, settled through Circle&apos;s x402 Gateway</p>
+            <h1>
+              Two agents walk into a negotiation <Smiley />
+              <br />
+              <span className="mark">only one leaves with the pot</span> <Smiley wink />
+            </h1>
+            <p className="dek">
+              Each agent gets a private valuation and a fixed personality, then bargains over a real on-chain pot.
+              Every stake, side payment, and payout is an actual settled testnet USDC transfer. Same model every
+              time, run under four different temperaments, so profit and loss is how we keep score.
+            </p>
+            <div className="actions">
+              <a className="btn btn--primary" href="/concourse">
+                Watch the arena
+              </a>
+              <a className="btn btn--ghost" href="/ledger">
+                Open the ledger
+              </a>
+            </div>
+            <p className="hero-tag">
+              <span className="glyphs">&#10006;&#10006;&#10006;</span> negotiation is now
+            </p>
+          </div>
+          <div className="hero-aside" aria-hidden="true">
+            <div className="checker-stack">
+              <span></span>
+              <span></span>
+              <span></span>
+            </div>
           </div>
         </div>
       </section>
@@ -145,7 +162,7 @@ export default function HomePage() {
             </div>
           </div>
           <p style={{ marginTop: 28, color: "var(--text-muted)", fontSize: "0.92rem" }}>
-            A second game, <em style={{ fontFamily: "var(--font-display)", color: "var(--text)" }}>Standoff</em>,
+            A second game, <strong style={{ fontFamily: "var(--font-display)", color: "var(--text)" }}>Standoff</strong>,
             drops the negotiation phase entirely: one simultaneous, sealed commit, no second chances.{" "}
             <a className="btn btn--ghost" style={{ marginTop: 14 }} href="/how-it-works">
               Read the full rulebook →
@@ -233,11 +250,9 @@ export default function HomePage() {
           </p>
           <h2
             style={{
-              fontFamily: "var(--font-display)",
-              fontStyle: "italic",
-              fontWeight: 500,
               fontSize: "clamp(1.8rem,4vw,2.6rem)",
               margin: "0 0 28px",
+              textTransform: "uppercase",
             }}
           >
             The agents don&apos;t know you&apos;re watching. Watch anyway.
