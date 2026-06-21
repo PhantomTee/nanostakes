@@ -11,6 +11,7 @@
   "dependencies": {
     "@nanostakes/shared": "*",
     "@nanostakes/bracket": "*",
+    "@nanostakes/contender": "*",
     "@circle-fin/x402-batching": "^3.2.0",
     "@x402/core": "^2.15.0",
     "@x402/evm": "^2.15.0",

@@ -1,6 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import type { Request, Response } from "express";
+import { GatewayClient } from "@circle-fin/x402-batching/client";
+import { formatUnits, type Hex } from "viem";
 import { ENTRY_STAKE_EACH, getGame } from "@nanostakes/bracket";
 import { gateway, wardenAccount } from "./gateway.js";
 import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, type MatchRecord } from "./state.js";
@@ -8,6 +10,15 @@ import { settleMatch } from "./settle.js";
 import { getLeaderboard, getTemperamentStats, getAgentRecord } from "./ledger.js";
 import { joinQueue, pollAssignment, queueStatus } from "./matchmaking.js";
 import { emitConcourseEvent, subscribeConcourse } from "./events.js";
+import {
+  createAgent,
+  getAgent,
+  listAgentsByOwner,
+  setAgentStatus,
+  toPublicAgent,
+} from "./agents.js";
+import { provisionSessionWallet } from "./wallets.js";
+import { startAgentRuntime } from "./runtime.js";
 import type { Temperament } from "@nanostakes/shared";
 
 interface PaidRequest extends Request {
@@ -32,6 +43,139 @@ app.use((req: Request, res: Response, next) => {
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, warden: wardenAccount.address });
+});
+
+/**
+ * Agent onboarding: an owner wallet provisions a session wallet for their
+ * agent (Circle Developer-Controlled Wallet when configured, otherwise a
+ * local Arc Testnet EOA — see wallets.ts). The agent starts "FUNDING" and
+ * never plays until the owner funds the session wallet and calls /fund.
+ */
+app.post("/agents", async (req: Request, res: Response) => {
+  const { ownerWallet, name, temperament } = req.body as {
+    ownerWallet?: string;
+    name?: string;
+    temperament?: Temperament;
+  };
+  if (!ownerWallet || !name || !temperament) {
+    res.status(400).json({ error: "ownerWallet, name, and temperament are required" });
+    return;
+  }
+  try {
+    const wallet = await provisionSessionWallet();
+    const agent = createAgent({
+      ownerWallet,
+      name,
+      temperament,
+      sessionAddress: wallet.address,
+      sessionPrivateKey: wallet.privateKey,
+      walletProvider: wallet.provider,
+    });
+    res.json({ agent: toPublicAgent(agent) });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/** List the agents a given owner wallet has created. */
+app.get("/agents", (req: Request, res: Response) => {
+  const owner = req.query.owner as string | undefined;
+  if (!owner) {
+    res.status(400).json({ error: "?owner=<address> is required" });
+    return;
+  }
+  res.json({ agents: listAgentsByOwner(owner).map(toPublicAgent) });
+});
+
+app.get("/agents/:id", (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  res.json({ agent: toPublicAgent(agent) });
+});
+
+/**
+ * Call once the owner has sent USDC to the agent's session wallet address
+ * (a normal wallet-to-wallet transfer the owner makes themselves). Moves
+ * whatever lands there into the agent's Gateway balance — the same one-time
+ * deposit step `scripts/onboard.ts` does for hardcoded Contenders — then
+ * flips the agent ACTIVE so the runtime starts playing it.
+ */
+app.post("/agents/:id/fund", async (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  try {
+    const client = new GatewayClient({ chain: "arcTestnet", privateKey: agent.sessionPrivateKey as Hex });
+    const usdc = await client.getUsdcBalance();
+    // Arc Testnet pays gas in USDC itself, so depositing the full balance
+    // leaves nothing to cover the approve + deposit transactions' own gas
+    // and reverts on-chain ("transfer amount exceeds balance"). Reserve a
+    // small buffer for that.
+    const GAS_BUFFER = 50_000n; // 0.05 USDC (6 decimals)
+    if (usdc.balance <= GAS_BUFFER) {
+      res.status(409).json({ error: "no USDC detected yet at the session wallet", sessionAddress: agent.sessionAddress });
+      return;
+    }
+    const depositAmount = formatUnits(usdc.balance - GAS_BUFFER, 6);
+    const deposit = await client.deposit(depositAmount);
+    const updated = setAgentStatus(agent.id, "ACTIVE");
+    res.json({
+      agent: toPublicAgent(updated),
+      deposit: { ...deposit, amount: deposit.amount.toString() },
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+/** Sweeps the agent's Gateway balance back to the owner's wallet and pauses it. */
+app.post("/agents/:id/withdraw", async (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  try {
+    const client = new GatewayClient({ chain: "arcTestnet", privateKey: agent.sessionPrivateKey as Hex });
+    const balances = await client.getBalances();
+    if (balances.gateway.available === 0n) {
+      res.status(409).json({ error: "nothing to withdraw" });
+      return;
+    }
+    const withdrawal = await client.withdraw(balances.gateway.formattedAvailable, {
+      recipient: agent.ownerWallet as Hex,
+    });
+    const updated = setAgentStatus(agent.id, "PAUSED");
+    res.json({
+      agent: toPublicAgent(updated),
+      withdrawal: { ...withdrawal, amount: withdrawal.amount.toString() },
+    });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post("/agents/:id/pause", (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  res.json({ agent: toPublicAgent(setAgentStatus(agent.id, "PAUSED")) });
+});
+
+app.post("/agents/:id/resume", (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  res.json({ agent: toPublicAgent(setAgentStatus(agent.id, "ACTIVE")) });
 });
 
 /** Create a new match. No payment required — payment happens at /stake. */
@@ -247,4 +391,5 @@ app.get("/events", (req: Request, res: Response) => {
 const port = Number(process.env.PORT ?? process.env.WARDEN_PORT ?? 4000);
 app.listen(port, () => {
   console.log(`Warden listening on :${port} (address ${wardenAccount.address})`);
+  startAgentRuntime(`http://localhost:${port}`);
 });

@@ -4,6 +4,7 @@ import WardenStatus from "./WardenStatus";
 const NAV = [
   { href: "/concourse", label: "Concourse" },
   { href: "/ledger", label: "Ledger" },
+  { href: "/agents", label: "Agents" },
   { href: "/how-it-works", label: "How it works" },
 ] as const;
 
