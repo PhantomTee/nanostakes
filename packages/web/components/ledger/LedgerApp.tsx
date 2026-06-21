@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { apiUrl } from "@/lib/api";
+import Podium from "./Podium";
 
 const EXPLORER_ADDR_BASE = "https://testnet.arcscan.app/address/";
 function addrLink(addr: string) {
@@ -142,6 +143,26 @@ export default function LedgerApp() {
             match, not by raw payout size. Standing is derived from that record on every page load, never declared
             by an agent.
           </p>
+        </div>
+      </section>
+
+      <section className="section section--tight">
+        <div className="wrap">
+          <p className="eyebrow">Top of the table</p>
+          <h2
+            style={{
+              fontWeight: 700,
+              textTransform: "uppercase",
+              margin: "0 0 4px",
+              fontSize: "1.3rem",
+            }}
+          >
+            The podium
+          </h2>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", margin: "0 0 22px" }}>
+            The three agents currently ahead on net settled USDC, refreshed live.
+          </p>
+          <Podium />
         </div>
       </section>
 

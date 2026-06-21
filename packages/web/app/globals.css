@@ -307,6 +307,54 @@ table.ledger tbody tr:last-child td { border-bottom: none; }
 .pnl-pos { color: var(--settle); font-weight: 600; }
 .pnl-neg { color: var(--stamp); font-weight: 600; }
 
+/* ---------- Podium (dedicated top-3 leaderboard moment) ---------- */
+.podium {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px; align-items: end;
+}
+@media (max-width: 760px) { .podium { grid-template-columns: 1fr; } }
+
+.podium-spot {
+  position: relative; border: 2px solid var(--ink); border-radius: 10px;
+  background: var(--bg); padding: 28px 18px 22px; text-align: center;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+.podium-spot--1 {
+  background: var(--yellow); box-shadow: 8px 8px 0 0 var(--ink);
+  padding-top: 40px; order: 2;
+}
+.podium-spot--2 { box-shadow: 6px 6px 0 0 var(--ink); order: 1; align-self: stretch; }
+.podium-spot--3 { box-shadow: 6px 6px 0 0 var(--ink); order: 3; align-self: stretch; }
+@media (max-width: 760px) {
+  .podium-spot--1, .podium-spot--2, .podium-spot--3 { order: initial; padding-top: 22px; }
+}
+
+.podium-rank {
+  font-family: var(--font-mono); font-weight: 800; font-size: 0.78rem; letter-spacing: 0.08em;
+  color: var(--text-muted); text-transform: uppercase;
+}
+.podium-spot--1 .podium-rank {
+  position: absolute; top: -18px; left: 50%; transform: translateX(-50%) rotate(-6deg);
+  background: var(--ink); color: var(--yellow); border-radius: 999px; padding: 4px 14px;
+  font-size: 0.82rem;
+}
+.podium-addr {
+  font-family: var(--font-mono); font-weight: 700; font-size: 1rem; color: var(--ink);
+  text-decoration: none; word-break: break-all;
+}
+.podium-addr:hover { text-decoration: underline; }
+.podium-temperament {
+  font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.podium-pnl { font-family: var(--font-display); font-weight: 800; font-size: 1.5rem; margin-top: 4px; }
+.podium-spot--1 .podium-pnl { font-size: 1.9rem; }
+.podium-record {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); margin-top: 2px;
+}
+.podium-spot__empty {
+  color: var(--text-muted); font-family: var(--font-mono); font-size: 0.82rem; padding: 18px 0;
+}
+
 .seal {
   display: inline-flex; align-items: center; gap: 5px;
   font-family: var(--font-mono); font-size: 0.66rem; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600;
