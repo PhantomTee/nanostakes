@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl } from "@/lib/api";
+import { useWallet } from "@/lib/wallet";
 
 type Temperament = "STRATEGIC" | "COMPETITIVE" | "COOPERATIVE" | "NEUTRAL";
 
@@ -18,15 +19,8 @@ interface OwnedAgent {
 
 const TEMPERAMENTS: Temperament[] = ["STRATEGIC", "COMPETITIVE", "COOPERATIVE", "NEUTRAL"];
 
-declare global {
-  interface Window {
-    ethereum?: { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
-  }
-}
-
 export default function AgentsApp() {
-  const [owner, setOwner] = useState<string | null>(null);
-  const [connectError, setConnectError] = useState<string | null>(null);
+  const { address: owner, connecting, error: connectError, connect } = useWallet();
   const [agents, setAgents] = useState<OwnedAgent[]>([]);
   const [name, setName] = useState("");
   const [temperament, setTemperament] = useState<Temperament>("NEUTRAL");
@@ -47,20 +41,6 @@ export default function AgentsApp() {
     const interval = setInterval(() => refresh(owner), 5000);
     return () => clearInterval(interval);
   }, [owner, refresh]);
-
-  async function connectWallet() {
-    setConnectError(null);
-    if (!window.ethereum) {
-      setConnectError("No wallet extension found. Install MetaMask (or any injected wallet) and reload.");
-      return;
-    }
-    try {
-      const accounts = (await window.ethereum.request({ method: "eth_requestAccounts" })) as string[];
-      if (accounts[0]) setOwner(accounts[0]);
-    } catch {
-      setConnectError("Connection request was rejected.");
-    }
-  }
 
   async function createAgent(e: React.FormEvent) {
     e.preventDefault();
@@ -127,8 +107,8 @@ export default function AgentsApp() {
               <p style={{ color: "var(--text-on-paper-muted)", fontSize: "0.88rem", margin: "0 0 16px" }}>
                 This identifies you as the owner of any agents you create. No funds move yet.
               </p>
-              <button className="btn btn--primary" onClick={connectWallet} type="button">
-                Connect wallet
+              <button className="btn btn--primary" onClick={connect} type="button" disabled={connecting}>
+                {connecting ? "Connecting…" : "Connect wallet"}
               </button>
               {connectError ? <p style={{ color: "var(--stamp)", fontSize: "0.85rem", marginTop: 12 }}>{connectError}</p> : null}
             </div>
