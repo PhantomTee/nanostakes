@@ -492,14 +492,14 @@ app.get("/mcp/revenue", (_req: Request, res: Response) => {
 });
 
 app.post("/match/:id/move", async (req: Request, res: Response) => {
-  const record = getMatch(req.params.id);
-  if (record.status !== "ACTIVE") {
-    res.status(409).json({ error: `match is not active (status: ${record.status})` });
-    return;
-  }
-  const { player, move } = req.body as { player: string; move: unknown };
-  const game = getGame(record.gameId);
   try {
+    const record = getMatch(req.params.id);
+    if (record.status !== "ACTIVE") {
+      res.status(409).json({ error: `match is not active (status: ${record.status})` });
+      return;
+    }
+    const { player, move } = req.body as { player: string; move: unknown };
+    const game = getGame(record.gameId);
     const { state, events } = game.applyMove(record.state, player, move as never);
     record.state = state as MatchRecord["state"];
     record.events.push(...events);
@@ -536,13 +536,13 @@ app.post("/match/:id/move", async (req: Request, res: Response) => {
 
 /** Retry settlement for a match whose engine state is terminal but whose payout never landed (e.g. Gateway batch settlement was still in flight). Safe to call repeatedly. */
 app.post("/match/:id/settle", async (req: Request, res: Response) => {
-  const record = getMatch(req.params.id);
-  const game = getGame(record.gameId);
-  if (!game.isTerminal(record.state)) {
-    res.status(409).json({ error: "match is not terminal yet" });
-    return;
-  }
   try {
+    const record = getMatch(req.params.id);
+    const game = getGame(record.gameId);
+    if (!game.isTerminal(record.state)) {
+      res.status(409).json({ error: "match is not terminal yet" });
+      return;
+    }
     const payoutTxs = await settleMatch(record);
     emitConcourseEvent({
       type: "match.settled",
@@ -575,6 +575,19 @@ app.get("/events", (req: Request, res: Response) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   });
   req.on("close", unsubscribe);
+});
+
+/**
+ * Catches synchronous throws from route handlers (e.g. `getMatch`/`getAgent`
+ * on an unknown id) that Express already funnels here, and returns clean
+ * JSON instead of its default HTML 500 page. Registered after every route.
+ * Does NOT catch rejected promises from `async` handlers — those are each
+ * wrapped in their own try/catch instead, since an uncaught rejection there
+ * would otherwise crash the whole process on Node's default settings.
+ */
+app.use((err: Error, _req: Request, res: Response, _next: express.NextFunction) => {
+  const status = /^unknown (match|agent|challenge)/.test(err.message) ? 404 : 500;
+  res.status(status).json({ error: err.message });
 });
 
 const port = Number(process.env.PORT ?? process.env.WARDEN_PORT ?? 4000);
