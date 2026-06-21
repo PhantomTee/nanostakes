@@ -244,7 +244,7 @@ app.get("/events", (req: Request, res: Response) => {
   req.on("close", unsubscribe);
 });
 
-const port = Number(process.env.WARDEN_PORT ?? 4000);
+const port = Number(process.env.PORT ?? process.env.WARDEN_PORT ?? 4000);
 app.listen(port, () => {
   console.log(`Warden listening on :${port} (address ${wardenAccount.address})`);
 });

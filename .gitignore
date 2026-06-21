@@ -3,3 +3,5 @@ dist/
 .env
 *.tsbuildinfo
 packages/warden/data/
+
+.vercel
