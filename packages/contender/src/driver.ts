@@ -57,7 +57,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const STAKE_RETRY_ATTEMPTS = 24;
+const STAKE_RETRY_ATTEMPTS = 40;
 const STAKE_RETRY_DELAY_MS = 5000;
 
 /**
