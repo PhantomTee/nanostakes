@@ -16,6 +16,8 @@ export interface MatchRecord {
   /** Optional caller-supplied metadata (e.g. each player's temperament) — the Warden has no other way to know this, it just tags it onto the ledger. */
   meta?: { temperaments?: Record<Address, Temperament> };
   createdAt?: string;
+  /** Bumped on every persistMatch() call — used to detect a match nobody has touched in a while (see abandon.ts). */
+  lastMoveAt?: string;
 }
 
 const matches = new Map<string, MatchRecord>();
@@ -32,12 +34,13 @@ const upsertMatchStmt = db.prepare(
  * Concourse's "watch any match" picker back to empty.
  */
 export function persistMatch(record: MatchRecord): void {
+  record.lastMoveAt = new Date().toISOString();
   upsertMatchStmt.run(
     record.state.matchId,
     record.gameId,
     record.status,
     JSON.stringify(record),
-    record.createdAt ?? new Date().toISOString(),
+    record.createdAt ?? record.lastMoveAt,
   );
 }
 
@@ -204,4 +207,28 @@ function redactAll<T>(rec: Record<Address, T>): Record<Address, null> {
 
 export function allMatches(): MatchRecord[] {
   return [...matches.values()].sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+}
+
+const deleteMatchStmt = db.prepare(`DELETE FROM matches WHERE matchId = ?`);
+
+/**
+ * Crash-loop nights (a stake payment that never lands) leave behind a trail
+ * of AWAITING_STAKES matches that will never resolve — the driver abandons
+ * each one and rejoins the queue fresh rather than retrying the same match.
+ * These just clutter Concourse's picker forever since nothing ever moves
+ * them to SETTLED. Safe to drop: nothing is escrowed against an unstaked
+ * match, so there's no money to account for.
+ */
+export function pruneStaleAwaitingStakes(maxAgeMs = 5 * 60 * 1000): number {
+  const cutoff = Date.now() - maxAgeMs;
+  let removed = 0;
+  for (const [matchId, record] of matches) {
+    if (record.status !== "AWAITING_STAKES") continue;
+    const createdAt = record.createdAt ? new Date(record.createdAt).getTime() : 0;
+    if (createdAt && createdAt > cutoff) continue;
+    matches.delete(matchId);
+    deleteMatchStmt.run(matchId);
+    removed++;
+  }
+  return removed;
 }

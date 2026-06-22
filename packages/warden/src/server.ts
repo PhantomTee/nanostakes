@@ -5,7 +5,7 @@ import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batchin
 import { formatUnits, type Hex } from "viem";
 import { ENTRY_STAKE_EACH, getGame } from "@nanostakes/bracket";
 import { gateway, wardenAccount } from "./gateway.js";
-import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, persistMatch, type MatchRecord } from "./state.js";
+import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, persistMatch, pruneStaleAwaitingStakes, type MatchRecord } from "./state.js";
 import { settleMatch } from "./settle.js";
 import { getLeaderboard, getTemperamentStats, getAgentRecord } from "./ledger.js";
 import { getOpponentMemory } from "./memory.js";
@@ -24,6 +24,7 @@ import {
 import { provisionSessionWallet } from "./wallets.js";
 import { getEurcBalance, withdrawEurc } from "./eurc.js";
 import { startAgentRuntime } from "./runtime.js";
+import { sweepAbandonedMatches } from "./abandon.js";
 import { recordMcpPayment, getMcpRevenueStats } from "./mcpRevenue.js";
 import type { Address, Temperament } from "@nanostakes/shared";
 
@@ -471,6 +472,18 @@ app.get("/matches", (_req: Request, res: Response) => {
   );
 });
 
+/** Drops AWAITING_STAKES matches older than 5 minutes — abandoned by a driver that rejoined the queue instead of retrying. Nothing is escrowed against an unstaked match, so there's no money to account for. */
+app.post("/matches/prune-stale", (_req: Request, res: Response) => {
+  const removed = pruneStaleAwaitingStakes();
+  res.json({ removed });
+});
+
+/** Manual trigger for the same sweep the background interval runs every 60s — mainly for testing/on-demand cleanup. */
+app.post("/matches/sweep-abandoned", async (_req: Request, res: Response) => {
+  const result = await sweepAbandonedMatches();
+  res.json(result);
+});
+
 /**
  * Metered MCP surface: the same read-only data as the free routes above
  * (/matches, /match/:id/state, /match/:id/public, /ledger), but priced as
@@ -627,8 +640,17 @@ app.use((err: Error, _req: Request, res: Response, _next: express.NextFunction) 
   res.status(status).json({ error: err.message });
 });
 
+const ABANDON_SWEEP_INTERVAL_MS = 60_000;
+
 const port = Number(process.env.PORT ?? process.env.WARDEN_PORT ?? 4000);
 app.listen(port, () => {
   console.log(`Warden listening on :${port} (address ${wardenAccount.address})`);
   startAgentRuntime(`http://localhost:${port}`);
+  setInterval(() => {
+    sweepAbandonedMatches()
+      .then(({ forfeited, voided }) => {
+        if (forfeited || voided) console.log(`[abandon] swept ${forfeited} forfeited, ${voided} voided`);
+      })
+      .catch((err) => console.error(`[abandon] sweep failed: ${(err as Error).message}`));
+  }, ABANDON_SWEEP_INTERVAL_MS);
 });

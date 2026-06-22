@@ -92,3 +92,86 @@ export async function settleMatch(record: MatchRecord): Promise<Record<Address, 
 
   return txs;
 }
+
+const ABANDON_RAKE_FRACTION = 0.03; // matches the games' own rake
+
+/**
+ * Forces a stuck ACTIVE match closed when one player has gone dark (paused,
+ * crashed, or otherwise stopped acting) while the other is still waiting on
+ * them. The engine has no concept of a clock — getResult() only ever runs
+ * once isTerminal() is true, and a silent opponent means it never will be.
+ * Without this, the match freezes forever and the responsive player's stake
+ * is trapped right alongside the absent one's. The forfeiting player gets
+ * nothing back; the rest of the pot (minus the same rake every normal
+ * settlement takes) goes to whoever was actually still there.
+ */
+export async function forfeitMatch(record: MatchRecord, forfeitingPlayer: Address): Promise<Record<Address, string>> {
+  if (record.status === "SETTLED" && record.payoutTxs) {
+    return record.payoutTxs;
+  }
+  const winner = record.state.players.find((p) => p !== forfeitingPlayer);
+  if (!winner) throw new Error("forfeitMatch: no other player to award the pot to");
+
+  const totalEscrow = record.state.entryStakeEach * record.state.players.length;
+  const winnerAmount = totalEscrow * (1 - ABANDON_RAKE_FRACTION);
+  await waitForAvailableBalance(winnerAmount);
+
+  const txs: Record<Address, string> = { ...(record.payoutTxs ?? {}) };
+  if (!txs[winner]) {
+    const withdrawal = await wardenGatewayClient.withdraw(winnerAmount.toFixed(6), {
+      chain: "arcTestnet",
+      recipient: winner as Hex,
+    });
+    txs[winner] = withdrawal.mintTxHash;
+  }
+
+  record.status = "SETTLED";
+  record.payoutTxs = txs;
+  persistMatch(record);
+
+  recordMatch({
+    players: record.state.players,
+    staked: Object.fromEntries(record.state.players.map((p) => [p, record.state.entryStakeEach])),
+    returned: { [winner]: winnerAmount, [forfeitingPlayer]: 0 },
+    temperaments: record.meta?.temperaments,
+  });
+
+  return txs;
+}
+
+/**
+ * Both players went dark before the match could really get going (e.g. both
+ * staked, then both crashed before round 1 ever resolved). There's no one
+ * to blame here, so refund everyone in full instead of picking an arbitrary
+ * "winner" — and no rake, since no game was actually played out.
+ */
+export async function voidMatch(record: MatchRecord): Promise<Record<Address, string>> {
+  if (record.status === "SETTLED" && record.payoutTxs) {
+    return record.payoutTxs;
+  }
+  const refundEach = record.state.entryStakeEach;
+  await waitForAvailableBalance(refundEach * record.state.players.length);
+
+  const txs: Record<Address, string> = { ...(record.payoutTxs ?? {}) };
+  for (const player of record.state.players) {
+    if (txs[player]) continue;
+    const withdrawal = await wardenGatewayClient.withdraw(refundEach.toFixed(6), {
+      chain: "arcTestnet",
+      recipient: player as Hex,
+    });
+    txs[player] = withdrawal.mintTxHash;
+  }
+
+  record.status = "SETTLED";
+  record.payoutTxs = txs;
+  persistMatch(record);
+
+  recordMatch({
+    players: record.state.players,
+    staked: Object.fromEntries(record.state.players.map((p) => [p, refundEach])),
+    returned: Object.fromEntries(record.state.players.map((p) => [p, refundEach])),
+    temperaments: record.meta?.temperaments,
+  });
+
+  return txs;
+}
