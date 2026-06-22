@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import type { Hex } from "viem";
 import { computeOfferCommitment, type Temperament } from "@nanostakes/shared";
+import { ENTRY_STAKE_EACH } from "@nanostakes/bracket";
 import { TemperamentAgent, type AgentProviders, type OpponentMemory } from "./agent.js";
 import { shouldAcceptChallenge, type OpponentRecord } from "./challengePolicy.js";
 
@@ -163,7 +164,7 @@ async function playMatch(
   const stakePayment = await payStakeWithRetry(
     client,
     `${wardenUrl}/match/${matchId}/stake`,
-    preStakeState.entryStakeEach,
+    ENTRY_STAKE_EACH,
     log,
   );
   log(`${agent.name} staked entry for match ${matchId} (${stakePayment.transaction})`);

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@nanostakes/shared": "*",
+    "@nanostakes/bracket": "*",
     "groq-sdk": "^1.2.1",
     "viem": "^2.21.26",
     "@circle-fin/x402-batching": "^3.2.0",
