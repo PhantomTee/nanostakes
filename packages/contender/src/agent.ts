@@ -133,8 +133,17 @@ Respond as JSON: {"ask": <number 0..1>, "escalate": <true|false>}`;
     }
   }
 
+  /**
+   * Groq's and OpenRouter's free tiers both rate-limit per-minute, and with
+   * several agents deciding moves concurrently it's easy to hit that ceiling
+   * on a perfectly healthy match. A single 429 used to propagate straight up
+   * as a driver crash — three of those in a row auto-paused the agent even
+   * though nothing was actually wrong with its funds or its match. Retry a
+   * few times first, honoring the provider's own Retry-After when it gives one.
+   */
   private async completeViaOpenRouter(
     messages: Array<{ role: "system" | "user"; content: string }>,
+    attempt = 1,
   ): Promise<Record<string, unknown>> {
     const res = await fetch(OPENROUTER_BASE_URL, {
       method: "POST",
@@ -148,12 +157,39 @@ Respond as JSON: {"ask": <number 0..1>, "escalate": <true|false>}`;
         temperature: 0.7,
       }),
     });
-    if (!res.ok) {
-      throw new Error(`OpenRouter failover failed: ${res.status} ${await res.text()}`);
+    if (res.ok) {
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      return parseJson(data.choices?.[0]?.message?.content ?? "{}");
     }
-    const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-    return parseJson(data.choices?.[0]?.message?.content ?? "{}");
+
+    const body = await res.text();
+    if (res.status === 429 && attempt < OPENROUTER_MAX_RETRIES) {
+      const waitMs = retryAfterMs(res.headers.get("retry-after"), body);
+      await sleep(waitMs);
+      return this.completeViaOpenRouter(messages, attempt + 1);
+    }
+    throw new Error(`OpenRouter failover failed: ${res.status} ${body}`);
   }
+}
+
+const OPENROUTER_MAX_RETRIES = 4;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Prefers the Retry-After header; falls back to the provider's own retry_after_seconds in the error body, then a flat default. */
+function retryAfterMs(retryAfterHeader: string | null, errorBody: string): number {
+  const headerSeconds = Number(retryAfterHeader);
+  if (Number.isFinite(headerSeconds) && headerSeconds > 0) return headerSeconds * 1000 + 500;
+  try {
+    const parsed = JSON.parse(errorBody) as { error?: { metadata?: { raw?: string } } };
+    const match = parsed.error?.metadata?.raw?.match(/retry.{0,20}?(\d+(?:\.\d+)?)/i);
+    if (match) return Number(match[1]) * 1000 + 500;
+  } catch {
+    // fall through to default
+  }
+  return 10_000;
 }
 
 /** LLM JSON-mode output sometimes wraps the object in markdown fences — strip those before parsing. */
