@@ -438,6 +438,57 @@ select, input {
 .t-row.sealed { color: var(--text-muted); }
 .t-row.escalated-tag { color: var(--stamp-bright); font-weight: 700; }
 
+/* Concourse arena: the two avatars + the track chips fly across when a move happens. */
+.arena-ring {
+  position: relative; display: flex; align-items: center; justify-content: space-between;
+  background: var(--panel); border: 2px solid var(--ink); border-radius: 10px;
+  padding: 18px 24px; margin-bottom: 14px; min-height: 92px; overflow: hidden;
+}
+.arena-avatar {
+  position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  width: 120px; text-align: center;
+}
+.arena-avatar .dot {
+  width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--ink); background: var(--bg);
+  display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-weight: 700;
+  font-size: 0.9rem; transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.arena-avatar .label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); word-break: break-all; }
+.arena-avatar.pulse .dot {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 6px rgba(245, 230, 53, 0.45);
+}
+.arena-avatar.settled-win .dot { border-color: var(--settle-bright); box-shadow: 0 0 0 6px rgba(26, 138, 67, 0.3); }
+.arena-track {
+  position: absolute; left: 100px; right: 100px; top: 50%; height: 2px; background: var(--line); opacity: 0.5;
+}
+.arena-chip {
+  position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 3;
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+  padding: 4px 10px; border-radius: 999px; border: 2px solid var(--ink); background: var(--yellow);
+  animation: arena-chip-fly-ltr 1100ms ease-out forwards;
+}
+.arena-chip.dir-rtl { animation-name: arena-chip-fly-rtl; }
+.arena-chip.kind-offer { background: #cdeaf6; }
+.arena-chip.kind-escalate { background: var(--stamp-bright); color: #fff; border-color: var(--ink); }
+.arena-chip.kind-msg { background: #d9f2e1; }
+@keyframes arena-chip-fly-ltr {
+  0% { left: 14%; opacity: 0; }
+  12% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: 86%; opacity: 0; }
+}
+@keyframes arena-chip-fly-rtl {
+  0% { left: 86%; opacity: 0; }
+  12% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: 14%; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .arena-chip { animation: none; left: 50%; opacity: 1; }
+  .arena-avatar.pulse .dot { transform: none; box-shadow: none; }
+}
+
 .tx-link { color: var(--stamp); text-decoration: none; word-break: break-all; }
 .tx-link:hover { text-decoration: underline; }
 

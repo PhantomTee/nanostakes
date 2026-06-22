@@ -95,12 +95,34 @@ export default function ConcourseApp() {
   const pickerRef = useRef<HTMLSelectElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const ledgerTopRef = useRef<HTMLDivElement>(null);
+  const arenaRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const picker = pickerRef.current!;
     const content = contentRef.current!;
     let pollHandle: ReturnType<typeof setInterval> | null = null;
     let cancelled = false;
+    let arenaPlayers: string[] = [];
+
+    function shortAddr(addr: string) {
+      return `${addr.slice(0, 4)}…${addr.slice(-3)}`;
+    }
+
+    function spawnArenaChip(actor: string, kind: "claim" | "offer" | "escalate" | "msg", text: string) {
+      const arena = arenaRef.current;
+      const track = arena?.querySelector<HTMLDivElement>("#arenaTrack");
+      if (!track) return;
+      const actorIndex = arenaPlayers.findIndex((p) => p.toLowerCase() === actor.toLowerCase());
+      if (actorIndex === -1) return;
+      const chip = document.createElement("div");
+      chip.className = `arena-chip kind-${kind} ${actorIndex === 1 ? "dir-rtl" : ""}`;
+      chip.textContent = text;
+      track.appendChild(chip);
+      const avatar = arena?.querySelector<HTMLDivElement>(`.arena-avatar[data-idx="${actorIndex}"]`);
+      avatar?.classList.add("pulse");
+      setTimeout(() => avatar?.classList.remove("pulse"), 500);
+      setTimeout(() => chip.remove(), 1150);
+    }
 
     async function loadMatches() {
       const res = await fetch(apiUrl("/matches"));
@@ -129,13 +151,34 @@ export default function ConcourseApp() {
 
     async function render() {
       const matchId = picker.value;
+      const arena = arenaRef.current;
       if (!matchId) {
         content.innerHTML = '<div id="empty" style="color:var(--text-muted);">Pick a match above.</div>';
+        if (arena) arena.style.display = "none";
         return;
       }
       const res = await fetch(apiUrl(`/match/${matchId}/public`));
       if (!res.ok) return;
       const state = await res.json();
+      arenaPlayers = state.players;
+
+      // Update the arena ring's avatars in place — never touch #arenaTrack's
+      // innerHTML here, or every 1s poll would wipe out any in-flight chip
+      // animation spawned by spawnArenaChip() before it finishes.
+      if (arena) {
+        arena.style.display = state.players.length === 2 ? "flex" : "none";
+        state.players.forEach((p: string, i: number) => {
+          const avatar = arena.querySelector<HTMLDivElement>(`.arena-avatar[data-idx="${i}"]`);
+          if (!avatar) return;
+          const won = state.payoutTxs && state.payoutTxs[p];
+          avatar.classList.toggle("settled-win", !!won);
+          const badge = state.badges?.[p];
+          const dot = avatar.querySelector(".dot");
+          const label = avatar.querySelector(".label");
+          if (dot) dot.textContent = (badge?.temperament ?? p).slice(0, 2).toUpperCase();
+          if (label) label.textContent = shortAddr(p);
+        });
+      }
 
       const playersHtml = state.players
         .map((p: string) => {
@@ -266,6 +309,15 @@ export default function ConcourseApp() {
       feed.prepend(div);
       while (feed.childNodes.length > 50) feed.removeChild(feed.lastChild!);
       if (evt.type === "match.staked" || evt.type === "match.settled") pulseFlow();
+      if (evt.type === "match.move" && evt.matchId === picker.value) {
+        const move = evt.data.move;
+        const actor = evt.data.player;
+        if (move?.type === "claim") spawnArenaChip(actor, "claim", `claims ${typeof move.value === "number" ? move.value.toFixed(2) : move.value}`);
+        else if (move?.type === "offer")
+          spawnArenaChip(actor, move.escalate ? "escalate" : "offer", `offers ${typeof move.ask === "number" ? move.ask.toFixed(2) : move.ask}${move.escalate ? " ⚡" : ""}`);
+        else if (move?.type === "message") spawnArenaChip(actor, "msg", "message");
+        else if (move?.type === "choice") spawnArenaChip(actor, "claim", `chose ${move.value}`);
+      }
       if (evt.matchId === picker.value) render();
       if (evt.type === "match.created") loadMatches();
       if (evt.type === "match.settled" || evt.type === "match.staked") renderLedgerTop();
@@ -359,6 +411,18 @@ export default function ConcourseApp() {
             <button className="btn btn--ghost" id="refreshList" type="button">
               Refresh match list
             </button>
+          </div>
+
+          <div ref={arenaRef} className="arena-ring" style={{ display: "none" }}>
+            <div className="arena-track" id="arenaTrack"></div>
+            <div className="arena-avatar" data-idx="0">
+              <div className="dot">??</div>
+              <span className="label">—</span>
+            </div>
+            <div className="arena-avatar" data-idx="1">
+              <div className="dot">??</div>
+              <span className="label">—</span>
+            </div>
           </div>
 
           <div ref={contentRef} id="content">
