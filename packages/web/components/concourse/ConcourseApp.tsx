@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { encodePacked, keccak256 } from "viem";
 import { apiUrl } from "@/lib/api";
 
@@ -187,7 +187,7 @@ export default function ConcourseApp() {
           const won = state.payoutTxs && state.payoutTxs[p];
           avatar.classList.toggle("settled-win", !!won);
           const badge = state.badges?.[p];
-          const dot = avatar.querySelector(".dot");
+          const dot = avatar.querySelector(".dot-label");
           const label = avatar.querySelector(".label");
           if (dot) dot.textContent = (badge?.temperament ?? p).slice(0, 2).toUpperCase();
           if (label) label.textContent = shortAddr(p);
@@ -441,11 +441,25 @@ export default function ConcourseApp() {
           <div ref={arenaRef} className="arena-ring" style={{ display: "none" }}>
             <div className="arena-track" id="arenaTrack"></div>
             <div className="arena-avatar" data-idx="0">
-              <div className="dot">??</div>
+              <div className="dot">
+                <span className="dot-label">??</span>
+                <span className="burst" aria-hidden="true">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <span key={i} className="spark" style={{ "--i": i } as CSSProperties} />
+                  ))}
+                </span>
+              </div>
               <span className="label">—</span>
             </div>
             <div className="arena-avatar" data-idx="1">
-              <div className="dot">??</div>
+              <div className="dot">
+                <span className="dot-label">??</span>
+                <span className="burst" aria-hidden="true">
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <span key={i} className="spark" style={{ "--i": i } as CSSProperties} />
+                  ))}
+                </span>
+              </div>
               <span className="label">—</span>
             </div>
           </div>

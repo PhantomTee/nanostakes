@@ -450,23 +450,51 @@ select, input {
   width: 120px; text-align: center;
 }
 .arena-avatar .dot {
-  width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--ink); background: var(--bg);
+  position: relative; width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--ink); background: var(--bg);
   display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-weight: 700;
   font-size: 0.9rem; transition: transform 160ms ease, box-shadow 160ms ease;
 }
+.arena-avatar .dot-label { position: relative; z-index: 2; }
 .arena-avatar .label { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); word-break: break-all; }
 .arena-avatar.pulse .dot {
   transform: scale(1.18);
   box-shadow: 0 0 0 6px rgba(245, 230, 53, 0.45);
 }
-.arena-avatar.settled-win .dot { border-color: var(--settle-bright); box-shadow: 0 0 0 6px rgba(26, 138, 67, 0.3); }
+.arena-avatar.settled-win .dot {
+  border-color: var(--settle-bright); box-shadow: 0 0 0 6px rgba(26, 138, 67, 0.3);
+  animation: settle-pop 420ms ease-out;
+}
+
+/* One-shot particle burst on the winning avatar at settlement — 8 small squares
+   radiating outward, matching the site's square/brutalist motif rather than round confetti. */
+.burst { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.spark {
+  position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
+  background: var(--yellow); border: 1.5px solid var(--ink);
+  transform: translate(-50%, -50%) rotate(calc(var(--i) * 45deg)) translateY(0) scale(1);
+  opacity: 0;
+}
+.spark:nth-child(even) { background: var(--stamp-bright); }
+.arena-avatar.settled-win .spark {
+  animation: spark-burst 650ms ease-out forwards;
+  animation-delay: calc(var(--i) * 16ms);
+}
+@keyframes spark-burst {
+  0% { opacity: 1; transform: translate(-50%, -50%) rotate(calc(var(--i) * 45deg)) translateY(0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) rotate(calc(var(--i) * 45deg)) translateY(-28px) scale(0.4); }
+}
+@keyframes settle-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
 .arena-track {
   position: absolute; left: 100px; right: 100px; top: 50%; height: 2px; background: var(--line); opacity: 0.5;
 }
 .arena-chip {
   position: absolute; top: 50%; transform: translate(-50%, -50%); z-index: 3;
-  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; white-space: nowrap;
-  padding: 4px 10px; border-radius: 999px; border: 2px solid var(--ink); background: var(--yellow);
+  font-family: var(--font-mono); font-size: 0.95rem; font-weight: 700; white-space: nowrap;
+  padding: 6px 14px; border-radius: 999px; border: 2px solid var(--ink); background: var(--yellow);
   animation: arena-chip-fly-ltr 1100ms ease-out forwards;
 }
 .arena-chip.dir-rtl { animation-name: arena-chip-fly-rtl; }
@@ -488,6 +516,8 @@ select, input {
 @media (prefers-reduced-motion: reduce) {
   .arena-chip { animation: none; left: 50%; opacity: 1; }
   .arena-avatar.pulse .dot { transform: none; box-shadow: none; }
+  .arena-avatar.settled-win .dot { animation: none; }
+  .arena-avatar.settled-win .spark { animation: none; opacity: 0; }
 }
 
 .tx-link { color: var(--stamp); text-decoration: none; word-break: break-all; }

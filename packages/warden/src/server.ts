@@ -18,6 +18,7 @@ import {
   listAgentsByOwner,
   listActiveAgents,
   setAgentStatus,
+  setAgentName,
   toPublicAgent,
 } from "./agents.js";
 import { provisionSessionWallet } from "./wallets.js";
@@ -277,6 +278,20 @@ app.post("/agents/:id/resume", (req: Request, res: Response) => {
     return;
   }
   res.json({ agent: toPublicAgent(setAgentStatus(agent.id, "ACTIVE")) });
+});
+
+app.post("/agents/:id/rename", (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) {
+    res.status(404).json({ error: "unknown agent" });
+    return;
+  }
+  const { name } = req.body as { name?: string };
+  if (!name || !name.trim()) {
+    res.status(400).json({ error: "name is required" });
+    return;
+  }
+  res.json({ agent: toPublicAgent(setAgentName(agent.id, name.trim())) });
 });
 
 /**

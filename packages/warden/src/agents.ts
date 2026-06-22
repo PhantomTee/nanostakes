@@ -27,6 +27,7 @@ const selectAgentById = db.prepare("SELECT * FROM owned_agents WHERE id = ?");
 const selectAgentsByOwner = db.prepare("SELECT * FROM owned_agents WHERE ownerWallet = ? COLLATE NOCASE");
 const selectActiveAgents = db.prepare("SELECT * FROM owned_agents WHERE status = 'ACTIVE'");
 const updateStatus = db.prepare("UPDATE owned_agents SET status = ? WHERE id = ?");
+const updateName = db.prepare("UPDATE owned_agents SET name = ? WHERE id = ?");
 
 export function createAgent(params: {
   ownerWallet: Address;
@@ -69,6 +70,13 @@ export function setAgentStatus(id: string, status: AgentStatus): OwnedAgent {
   if (!agent) throw new Error(`unknown agent: ${id}`);
   updateStatus.run(status, id);
   return { ...agent, status };
+}
+
+export function setAgentName(id: string, name: string): OwnedAgent {
+  const agent = getAgent(id);
+  if (!agent) throw new Error(`unknown agent: ${id}`);
+  updateName.run(name, id);
+  return { ...agent, name };
 }
 
 /** Strips the session private key before sending an agent over the wire. */
