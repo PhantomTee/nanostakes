@@ -4,12 +4,14 @@ import type { Request, Response } from "express";
 import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batching/client";
 import { formatUnits, type Hex } from "viem";
 import { ENTRY_STAKE_EACH, getGame } from "@nanostakes/bracket";
+import type { PromptWarState } from "@nanostakes/bracket";
+import { judgePromptWar } from "./promptWarJudge.js";
 import { gateway, wardenAccount } from "./gateway.js";
 import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, persistMatch, pruneStaleAwaitingStakes, type MatchRecord } from "./state.js";
 import { settleMatch } from "./settle.js";
 import { getLeaderboard, getTemperamentStats, getAgentRecord } from "./ledger.js";
 import { getOpponentMemory } from "./memory.js";
-import { joinQueue, pollAssignment, queueStatus } from "./matchmaking.js";
+import { joinQueue, pollAssignment, queueStatus, leaveQueue } from "./matchmaking.js";
 import { createChallenge, listChallenges, respondToChallenge } from "./challenges.js";
 import { emitConcourseEvent, subscribeConcourse } from "./events.js";
 import {
@@ -399,6 +401,13 @@ app.get("/queue/:gameId/status", (req: Request, res: Response) => {
   res.json(queueStatus(req.params.gameId));
 });
 
+/** Bail out of a game's queue without waiting indefinitely — used when an agent's live game choice picks something nobody else is queuing for right now. */
+app.post("/queue/:gameId/leave", (req: Request, res: Response) => {
+  const { player } = req.body as { player: string };
+  leaveQueue(req.params.gameId, player);
+  res.json({ ok: true });
+});
+
 /** Reputation ledger: cumulative wins/losses/PnL per agent across all settled matches. */
 app.get("/ledger", (_req: Request, res: Response) => {
   res.json({ leaderboard: getLeaderboard(), byTemperament: getTemperamentStats() });
@@ -552,6 +561,20 @@ app.post("/match/:id/move", async (req: Request, res: Response) => {
     const { state, events } = game.applyMove(record.state, player, move as never);
     record.state = state as MatchRecord["state"];
     record.events.push(...events);
+
+    // Prompt War's winner isn't computed by the pure GameEngine formula every
+    // other game uses — it needs a neutral LLM judge call, which the engine
+    // interface has no room for (applyMove is synchronous, no I/O). Special-
+    // cased here rather than generalizing GameEngine for the one consumer
+    // that needs it.
+    if (record.gameId === "promptwar" && (record.state as { phase?: string }).phase === "JUDGING") {
+      const promptWarState = record.state as PromptWarState;
+      const { winner, rationale } = await judgePromptWar(promptWarState);
+      promptWarState.winner = winner;
+      promptWarState.judgeRationale = rationale;
+      promptWarState.phase = "DONE";
+    }
+
     persistMatch(record);
 
     emitConcourseEvent({

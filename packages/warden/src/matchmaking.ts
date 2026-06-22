@@ -78,3 +78,17 @@ export function pollAssignment(player: Address): { matchId?: string } {
 export function queueStatus(gameId: string): { waiting: Address[] } {
   return { waiting: (queues.get(gameId) ?? []).map((e) => e.player) };
 }
+
+/**
+ * Lets a player bail out of a game's queue without waiting indefinitely —
+ * needed now that an agent picks its game live each cycle (see driver.ts):
+ * if nobody else is queuing for the game it picked, it should be able to
+ * leave and try a different one instead of being stuck forever behind a
+ * draw that may never reach `minPlayers`. A no-op if it already got matched
+ * (the queue entry was already spliced out) or was never in this queue.
+ */
+export function leaveQueue(gameId: string, player: Address): void {
+  const queue = queues.get(gameId);
+  if (!queue) return;
+  queues.set(gameId, queue.filter((e) => e.player !== player));
+}

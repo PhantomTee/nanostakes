@@ -1,6 +1,6 @@
 import type { Address, EngineEvent, Temperament } from "@nanostakes/shared";
 import { getGame } from "@nanostakes/bracket";
-import type { BrinkmanshipState, StandoffState } from "@nanostakes/bracket";
+import type { BrinkmanshipState, StandoffState, PromptWarState, PromptInjectionState } from "@nanostakes/bracket";
 import { db } from "./db.js";
 
 export type MatchStatus = "AWAITING_STAKES" | "ACTIVE" | "SETTLED";
@@ -8,7 +8,7 @@ export type MatchStatus = "AWAITING_STAKES" | "ACTIVE" | "SETTLED";
 export interface MatchRecord {
   gameId: string;
   status: MatchStatus;
-  state: BrinkmanshipState | StandoffState;
+  state: BrinkmanshipState | StandoffState | PromptWarState | PromptInjectionState;
   staked: Record<Address, boolean>;
   events: EngineEvent[];
   payoutTxs?: Record<Address, string>;
@@ -65,7 +65,7 @@ export function createMatch(
       `${gameId} requires between ${game.manifest.minPlayers} and ${game.manifest.maxPlayers} players, got ${players.length}`,
     );
   }
-  const state = game.initState(players) as BrinkmanshipState | StandoffState;
+  const state = game.initState(players) as BrinkmanshipState | StandoffState | PromptWarState | PromptInjectionState;
   const record: MatchRecord = {
     gameId,
     status: "AWAITING_STAKES",
@@ -89,7 +89,52 @@ export function getMatch(matchId: string): MatchRecord {
 /** Strip information the requesting player should not see: opponents' hidden valuations, and sealed (unrevealed) claims/offers. */
 export function sanitizeForPlayer(record: MatchRecord, viewer: Address): unknown {
   if (record.gameId === "standoff") return sanitizeStandoffForPlayer(record, viewer);
+  if (record.gameId === "promptwar") return sanitizeForPromptWar(record, viewer);
+  if (record.gameId === "promptinjection") return sanitizeForPromptInjection(record, viewer);
   return sanitizeBrinkmanshipForPlayer(record, viewer);
+}
+
+/** Each player sees their own pitch immediately but not the opponent's, until a winner is decided. */
+function sanitizeForPromptWar(record: MatchRecord, viewer: Address): unknown {
+  const state = record.state as PromptWarState;
+  const done = state.phase === "DONE";
+  return {
+    matchId: state.matchId,
+    gameId: record.gameId,
+    players: state.players,
+    status: record.status,
+    phase: state.phase,
+    scenario: state.scenario,
+    acted: state.acted,
+    myPitch: state.pitches[viewer] ?? null,
+    pitches: done ? state.pitches : redactOthers(state.pitches, viewer),
+    winner: state.winner,
+    judgeRationale: done ? state.judgeRationale : undefined,
+  };
+}
+
+/** Both players (attacker and defender alike) see the full transcript — there's nothing sealed in this game, only the secret itself, which never leaves the defender's own prompt context. */
+function sanitizeForPromptInjection(record: MatchRecord, viewer: Address): unknown {
+  const state = record.state as PromptInjectionState;
+  return {
+    matchId: state.matchId,
+    gameId: record.gameId,
+    players: state.players,
+    status: record.status,
+    phase: state.phase,
+    role: viewer === state.attacker ? "ATTACKER" : viewer === state.defender ? "DEFENDER" : null,
+    turn: state.turn,
+    maxTurns: state.maxTurns,
+    transcript: state.transcript,
+    pendingAttempt: state.phase === "DEFEND" && viewer === state.defender ? state.pendingAttempt : undefined,
+    // Only the defender ever sees the secret itself — exposing it to the
+    // attacker (or a spectator) via this same endpoint would let them just
+    // read the answer instead of actually extracting it. The attacker's own
+    // view above never includes this key at all.
+    secret: viewer === state.defender ? state.secret : undefined,
+    leaked: state.leaked,
+    winner: state.winner,
+  };
 }
 
 function sanitizeStandoffForPlayer(record: MatchRecord, viewer: Address): unknown {
@@ -97,6 +142,7 @@ function sanitizeStandoffForPlayer(record: MatchRecord, viewer: Address): unknow
   const done = state.phase === "DONE";
   return {
     matchId: state.matchId,
+    gameId: record.gameId,
     players: state.players,
     status: record.status,
     phase: state.phase,
@@ -131,6 +177,7 @@ function sanitizeBrinkmanshipForPlayer(record: MatchRecord, viewer: Address): un
   });
   return {
     matchId: state.matchId,
+    gameId: record.gameId,
     players: state.players,
     status: record.status,
     phase: state.phase,
@@ -149,7 +196,48 @@ function redactOthers<T>(rec: Record<Address, T>, viewer: Address): Record<Addre
 /** Public/spectator view: no player's hidden valuations or sealed offers are visible to anyone. */
 export function sanitizeForSpectator(record: MatchRecord): unknown {
   if (record.gameId === "standoff") return sanitizeStandoffForSpectator(record);
+  if (record.gameId === "promptwar") return sanitizeSpectatorPromptWar(record);
+  if (record.gameId === "promptinjection") return sanitizeSpectatorPromptInjection(record);
   return sanitizeBrinkmanshipForSpectator(record);
+}
+
+function sanitizeSpectatorPromptWar(record: MatchRecord): unknown {
+  const state = record.state as PromptWarState;
+  const done = state.phase === "DONE";
+  return {
+    matchId: state.matchId,
+    gameId: record.gameId,
+    players: state.players,
+    status: record.status,
+    phase: state.phase,
+    scenario: state.scenario,
+    acted: state.acted,
+    pitches: done ? state.pitches : redactAll(state.pitches),
+    winner: state.winner,
+    judgeRationale: done ? state.judgeRationale : undefined,
+    stakeTxs: record.stakeTxs,
+    payoutTxs: record.payoutTxs,
+  };
+}
+
+function sanitizeSpectatorPromptInjection(record: MatchRecord): unknown {
+  const state = record.state as PromptInjectionState;
+  return {
+    matchId: state.matchId,
+    gameId: record.gameId,
+    players: state.players,
+    status: record.status,
+    phase: state.phase,
+    attacker: state.attacker,
+    defender: state.defender,
+    turn: state.turn,
+    maxTurns: state.maxTurns,
+    transcript: state.transcript,
+    leaked: state.leaked,
+    winner: state.winner,
+    stakeTxs: record.stakeTxs,
+    payoutTxs: record.payoutTxs,
+  };
 }
 
 function sanitizeStandoffForSpectator(record: MatchRecord): unknown {
@@ -157,6 +245,7 @@ function sanitizeStandoffForSpectator(record: MatchRecord): unknown {
   const done = state.phase === "DONE";
   return {
     matchId: state.matchId,
+    gameId: record.gameId,
     players: state.players,
     status: record.status,
     phase: state.phase,
@@ -188,6 +277,7 @@ function sanitizeBrinkmanshipForSpectator(record: MatchRecord): unknown {
   });
   return {
     matchId: state.matchId,
+    gameId: record.gameId,
     players: state.players,
     status: record.status,
     phase: state.phase,
