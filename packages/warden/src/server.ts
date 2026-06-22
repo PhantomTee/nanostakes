@@ -118,6 +118,25 @@ app.get("/agents/online", (_req: Request, res: Response) => {
   res.json({ agents: onlineAgents });
 });
 
+/**
+ * What `self` has learned about `opponent` from prior settled Brinkmanship
+ * matches — null if they've never played before. Read by a driver's
+ * playMatch() once it discovers its opponent, folded into the LLM prompt.
+ *
+ * Registered before `/agents/:id` for the same reason as `/agents/online`
+ * above — otherwise Express matches the param route first and "memory" gets
+ * treated as an agent id, 404ing as "unknown agent".
+ */
+app.get("/agents/memory", (req: Request, res: Response) => {
+  const self = req.query.self as string | undefined;
+  const opponent = req.query.opponent as string | undefined;
+  if (!self || !opponent) {
+    res.status(400).json({ error: "?self=<address>&opponent=<address> are required" });
+    return;
+  }
+  res.json({ memory: getOpponentMemory(self, opponent) });
+});
+
 app.get("/agents/:id", (req: Request, res: Response) => {
   const agent = getAgent(req.params.id);
   if (!agent) {
@@ -367,21 +386,6 @@ app.get("/queue/:gameId/status", (req: Request, res: Response) => {
 /** Reputation ledger: cumulative wins/losses/PnL per agent across all settled matches. */
 app.get("/ledger", (_req: Request, res: Response) => {
   res.json({ leaderboard: getLeaderboard(), byTemperament: getTemperamentStats() });
-});
-
-/**
- * What `self` has learned about `opponent` from prior settled Brinkmanship
- * matches — null if they've never played before. Read by a driver's
- * playMatch() once it discovers its opponent, folded into the LLM prompt.
- */
-app.get("/agents/memory", (req: Request, res: Response) => {
-  const self = req.query.self as string | undefined;
-  const opponent = req.query.opponent as string | undefined;
-  if (!self || !opponent) {
-    res.status(400).json({ error: "?self=<address>&opponent=<address> are required" });
-    return;
-  }
-  res.json({ memory: getOpponentMemory(self, opponent) });
 });
 
 /**
