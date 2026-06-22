@@ -57,20 +57,26 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const STAKE_RETRY_ATTEMPTS = 6;
+const STAKE_RETRY_ATTEMPTS = 24;
 const STAKE_RETRY_DELAY_MS = 5000;
 
 /**
- * Two distinct reasons staking can fail, and they need different handling:
+ * Two distinct reasons staking can fail, confirmed by intercepting the raw
+ * Warden response (the SDK's thrown error discards the `reason` field):
  *
- * 1. Genuinely insufficient balance (the common case — a prior match was lost
- *    and the remainder is below the next entry stake). Retrying never helps
- *    this; it just delays an inevitable failure. Fail fast with a message
- *    that says what actually happened, so it's obvious funding is needed.
- * 2. A real transient Gateway hiccup despite having enough balance. Worth a
- *    short retry budget (30s) — not the 120s settle.ts uses server-side,
- *    since `withdrawing` would be nonzero if a payout were genuinely still
- *    in flight, and we've already confirmed `available` covers the stake.
+ * 1. Genuinely insufficient balance (a prior match was lost and the
+ *    remainder is below the next entry stake). Caught by the pre-check
+ *    below before ever attempting payment — retrying never helps this,
+ *    it just delays an inevitable failure. Fail fast instead, with a
+ *    message that says what actually happened.
+ * 2. `reason: "insufficient_balance"` from Circle's facilitator *despite*
+ *    on-chain balance being confirmed sufficient by the pre-check. This
+ *    happens right after a fresh `/fund` deposit: `getBalances()` reads
+ *    the GatewayWallet contract directly (instant), but the facilitator
+ *    checks its own off-chain ledger index, which lags behind a deposit
+ *    that just landed on-chain. Worth a real retry budget here — this is
+ *    the case the original (mis-targeted) 120s retry was meant for, just
+ *    pointed at the wrong condition.
  */
 async function payStakeWithRetry(
   client: GatewayClient,
