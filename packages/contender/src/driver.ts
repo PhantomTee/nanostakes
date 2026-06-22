@@ -66,7 +66,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const STAKE_RETRY_ATTEMPTS = 40;
+const STAKE_RETRY_ATTEMPTS = 15;
 const STAKE_RETRY_DELAY_MS = 5000;
 
 /**
@@ -83,9 +83,17 @@ const STAKE_RETRY_DELAY_MS = 5000;
  *    happens right after a fresh `/fund` deposit: `getBalances()` reads
  *    the GatewayWallet contract directly (instant), but the facilitator
  *    checks its own off-chain ledger index, which lags behind a deposit
- *    that just landed on-chain. Worth a real retry budget here — this is
- *    the case the original (mis-targeted) 120s retry was meant for, just
- *    pointed at the wrong condition.
+ *    that just landed on-chain.
+ *
+ * Confirmed live: a long, blind retry budget here is actively counter-
+ * productive — four agents that passed the pre-check still failed every
+ * single one of 40 attempts, and were measurably *more* short of funds
+ * by the end than at the start, despite no payment ever succeeding. Each
+ * attempt looks like it consumes/reserves a sliver of "available" balance
+ * even on failure (a new EIP-3009 authorization signed and submitted each
+ * time). So: a moderate budget (75s), and re-check balance before every
+ * attempt — not just once up front — to bail out the moment it's no
+ * longer true, instead of hammering a balance that's draining in real time.
  */
 async function payStakeWithRetry(
   client: GatewayClient,
@@ -93,23 +101,22 @@ async function payStakeWithRetry(
   entryStakeEach: number,
   log: (m: string) => void,
 ): Promise<Awaited<ReturnType<GatewayClient["pay"]>>> {
-  const balances = await client.getBalances();
-  const available = Number(balances.gateway.formattedAvailable);
-  if (available < entryStakeEach) {
-    throw new Error(
-      `Insufficient balance to stake: have ${available.toFixed(6)} USDC available, need ${entryStakeEach} USDC. Fund the session wallet to resume.`,
-    );
-  }
-
   let lastErr: unknown;
   for (let attempt = 1; attempt <= STAKE_RETRY_ATTEMPTS; attempt++) {
+    const balances = await client.getBalances();
+    const available = Number(balances.gateway.formattedAvailable);
+    if (available < entryStakeEach) {
+      throw new Error(
+        `Insufficient balance to stake: have ${available.toFixed(6)} USDC available, need ${entryStakeEach} USDC. Fund the session wallet to resume.`,
+      );
+    }
     try {
       return await client.pay(url, { method: "POST" });
     } catch (err) {
       lastErr = err;
       if (attempt < STAKE_RETRY_ATTEMPTS) {
         log(
-          `stake payment attempt ${attempt}/${STAKE_RETRY_ATTEMPTS} failed (${(err as Error).message}) despite sufficient balance — retrying in ${STAKE_RETRY_DELAY_MS / 1000}s`,
+          `stake payment attempt ${attempt}/${STAKE_RETRY_ATTEMPTS} failed (${(err as Error).message}) despite sufficient balance (${available.toFixed(4)} available) — retrying in ${STAKE_RETRY_DELAY_MS / 1000}s`,
         );
         await sleep(STAKE_RETRY_DELAY_MS);
       }
