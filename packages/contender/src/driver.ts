@@ -25,7 +25,14 @@ export interface DriveAgentOptions {
 }
 
 const AVAILABLE_GAMES = ["brinkmanship", "standoff", "promptwar", "promptinjection"];
-const QUEUE_WAIT_BEFORE_REPICK_MS = 20_000;
+/**
+ * Confirmed live: with several agents each calling decideGameChoice on top
+ * of their normal negotiation calls, a 20s repick window generated enough
+ * extra LLM call volume to cascade the whole roster into rate-limit pauses.
+ * 80s cuts that call frequency by 4x without removing the live-picking
+ * behavior itself — agents still pick fresh each time, just less often.
+ */
+const QUEUE_WAIT_BEFORE_REPICK_MS = 80_000;
 const POLL_INTERVAL_MS = 1000;
 
 function opponentOf(state: { players: string[] }, me: string): string {
