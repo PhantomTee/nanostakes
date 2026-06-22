@@ -1,10 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { encodePacked, keccak256 } from "viem";
 import { apiUrl } from "@/lib/api";
 
 const EXPLORER_TX_BASE = "https://testnet.arcscan.app/tx/";
 const EXPLORER_ADDR_BASE = "https://testnet.arcscan.app/address/";
+
+/**
+ * Mirrors packages/shared/src/index.ts's computeOfferCommitment exactly —
+ * duplicated rather than imported, since the web package otherwise has no
+ * dependency on @nanostakes/shared. This is the point of the commit-reveal
+ * scheme: a spectator's own browser re-derives the hash from the revealed
+ * (ask, escalate, nonce) and checks it against the commitment that was
+ * already visible before the reveal, instead of trusting the Warden's word.
+ */
+function computeOfferCommitment(ask: number, escalate: boolean, nonce: string): string {
+  const askScaled = BigInt(Math.round(ask * 1_000_000));
+  return keccak256(encodePacked(["uint256", "bool", "bytes32"], [askScaled, escalate, nonce as `0x${string}`]));
+}
 
 function txLink(hash?: string) {
   if (!hash) return "";
@@ -205,11 +219,22 @@ export default function ConcourseApp() {
                 .map(([addr, c]) => `<div class="t-row claim">claim ${addr.slice(0, 8)}…: ${JSON.stringify(c)}</div>`)
                 .join("");
               const offers = Object.entries(r.offers || {})
-                .map(([addr, o]) =>
-                  o === null
-                    ? `<div class="t-row sealed">offer ${addr.slice(0, 8)}…: sealed</div>`
-                    : `<div class="t-row offer">offer ${addr.slice(0, 8)}…: ${JSON.stringify(o)}</div>`,
-                )
+                .map(([addr, o]) => {
+                  const short = addr.slice(0, 8);
+                  const commitment: string | undefined = r.offerCommitments?.[addr];
+                  const nonce: string | null | undefined = r.offerNonces?.[addr];
+                  if (o === null) {
+                    return commitment
+                      ? `<div class="t-row sealed">offer ${short}…: sealed <span class="commit-hash" title="${commitment}">commitment ${commitment.slice(0, 10)}&hellip;</span></div>`
+                      : `<div class="t-row sealed">offer ${short}…: sealed</div>`;
+                  }
+                  if (commitment && nonce) {
+                    const recomputed = computeOfferCommitment(Number(o), !!r.escalated?.[addr], nonce);
+                    const verified = recomputed.toLowerCase() === commitment.toLowerCase();
+                    return `<div class="t-row offer">offer ${short}…: ${JSON.stringify(o)} <span class="${verified ? "verify-ok" : "verify-bad"}" title="${commitment}">${verified ? "&check; verified" : "&cross; hash mismatch"}</span></div>`;
+                  }
+                  return `<div class="t-row offer">offer ${short}…: ${JSON.stringify(o)}</div>`;
+                })
                 .join("");
               const messages = (r.messages || [])
                 .map((m: any) => `<div class="t-row msg">${m.from.slice(0, 8)}…: "${m.text ?? m.message ?? JSON.stringify(m)}"</div>`)

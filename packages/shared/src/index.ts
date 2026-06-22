@@ -1,3 +1,5 @@
+import { encodePacked, keccak256 } from "viem";
+
 export type Address = string;
 
 export type Temperament = "STRATEGIC" | "COMPETITIVE" | "COOPERATIVE" | "NEUTRAL";
@@ -41,6 +43,16 @@ export interface OfferMove {
   type: "offer";
   ask: number; // fraction of round pot this player is asking for, 0..1
   escalate?: boolean;
+  /**
+   * Optional cryptographic commitment (see computeOfferCommitment below) the
+   * client computed over (ask, escalate, nonce) before submitting this same
+   * move. Lets a spectator prove an offer was fixed in advance — not just
+   * trust the server's word that it was sealed — once `nonce` is also
+   * revealed at round resolution. Omit for callers that don't need this
+   * (e.g. the manual phase-1 scripts).
+   */
+  commitment?: string;
+  nonce?: string;
 }
 
 export type Move = ClaimMove | MessageMove | OfferMove;
@@ -56,6 +68,10 @@ export interface RoundState {
   messages: ChatMessage[];
   resolved: boolean;
   payoutFraction?: Record<Address, number>; // each player's share of *this round's* pot
+  /** keccak256 commitment of (ask, escalate, nonce) — safe to reveal even while the offer itself is sealed; proves it was fixed in advance. */
+  offerCommitments: Record<Address, string>;
+  /** Revealed only once the round resolves; combined with `offers`/`escalated`, lets anyone independently re-derive and check the commitment above. */
+  offerNonces: Record<Address, string>;
 }
 
 export interface MatchState {
@@ -127,3 +143,22 @@ export const ARC_TESTNET = {
   gatewayWalletAddress: "0x0077777d7EBA4688BDeF3E311b846F25870A19B9",
   gatewayFacilitatorUrl: "https://gateway-api-testnet.circle.com",
 } as const;
+
+/** Fraction (0..1) is fixed to this many decimal places before hashing, so the same `ask` always commits to the same hash regardless of float formatting. */
+const COMMITMENT_SCALE = 1_000_000;
+
+/**
+ * keccak256 commitment over a sealed Brinkmanship offer, used by both the
+ * client (driver.ts, computing it before submitting) and anyone verifying a
+ * reveal later (the engine on submission, Concourse in the browser once the
+ * round resolves). Same inputs always produce the same hash, so a third
+ * party can independently confirm `value + nonce` actually produces the
+ * commitment that was visible before the reveal — they don't have to trust
+ * the Warden's word for it.
+ */
+export function computeOfferCommitment(ask: number, escalate: boolean, nonce: string): string {
+  const askScaled = BigInt(Math.round(ask * COMMITMENT_SCALE));
+  return keccak256(
+    encodePacked(["uint256", "bool", "bytes32"], [askScaled, escalate, nonce as `0x${string}`]),
+  );
+}

@@ -73,8 +73,15 @@ export default function LedgerApp() {
             '<p style="color:var(--text-on-paper-muted)">No settled matches yet. The first row is waiting to be written.</p>';
         } else {
           const rows = leaderboard
-            .map(
-              (a: any, i: number) => `<tr>
+            .map((a: any, i: number) => {
+              const b = a.behavior;
+              const behaviorCells =
+                b && b.sampleSize > 0
+                  ? `<td title="${b.sampleSize} rounds">${(b.concessionRate * 100).toFixed(0)}%</td>
+                     <td title="${b.sampleSize} rounds">${(b.escalationRate * 100).toFixed(0)}%</td>
+                     <td title="${b.sampleSize} rounds">${b.fairShareGap.toFixed(2)}</td>`
+                  : `<td>&mdash;</td><td>&mdash;</td><td>&mdash;</td>`;
+              return `<tr>
                 <td>${i + 1}</td>
                 <td>${addrLink(a.address)}</td>
                 <td>${a.temperament ?? "n/a"}</td>
@@ -84,13 +91,14 @@ export default function LedgerApp() {
                 <td>${a.totalStaked.toFixed(2)}</td>
                 <td>${a.totalReturned.toFixed(4)}</td>
                 <td class="${a.netPnl >= 0 ? "pnl-pos" : "pnl-neg"}">${a.netPnl >= 0 ? "+" : ""}${a.netPnl.toFixed(4)}</td>
-              </tr>`,
-            )
+                ${behaviorCells}
+              </tr>`;
+            })
             .join("");
-          lb.innerHTML = `<table class="ledger">
-            <thead><tr><th>Rank</th><th>Agent</th><th>Temperament</th><th>Standing</th><th>Matches</th><th>W/L/T</th><th>Staked</th><th>Returned</th><th>Net</th></tr></thead>
+          lb.innerHTML = `<div class="ledger-scroll"><table class="ledger">
+            <thead><tr><th>Rank</th><th>Agent</th><th>Temperament</th><th>Standing</th><th>Matches</th><th>W/L/T</th><th>Staked</th><th>Returned</th><th>Net</th><th title="How much each sealed ask moves toward an even split vs digging in on the public claim">Concession</th><th title="Fraction of rounds this agent escalated the pot">Escalation</th><th title="Average distance of the public claim from an even 50/50 split">Fair-share gap</th></tr></thead>
             <tbody>${rows}</tbody>
-          </table>`;
+          </table></div>`;
         }
 
         const entries = Object.entries(byTemperament);

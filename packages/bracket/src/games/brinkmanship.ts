@@ -1,14 +1,15 @@
 import { randomUUID } from "node:crypto";
-import type {
-  Address,
-  ChatMessage,
-  EngineEvent,
-  GameEngine,
-  GameManifest,
-  MatchResult,
-  MatchState,
-  Move,
-  RoundState,
+import {
+  computeOfferCommitment,
+  type Address,
+  type ChatMessage,
+  type EngineEvent,
+  type GameEngine,
+  type GameManifest,
+  type MatchResult,
+  type MatchState,
+  type Move,
+  type RoundState,
 } from "@nanostakes/shared";
 
 const ROUND_COUNT = 5;
@@ -33,6 +34,8 @@ function dealRound(index: number): RoundState {
     escalated: {},
     messages: [],
     resolved: false,
+    offerCommitments: {},
+    offerNonces: {},
   };
 }
 
@@ -179,6 +182,17 @@ function applyMove(
 
   if (move.type === "offer") {
     if (state.phase !== "OFFER") throw new Error("offer only allowed during OFFER phase");
+    if (move.commitment && move.nonce) {
+      const expected = computeOfferCommitment(move.ask, !!move.escalate, move.nonce);
+      if (expected.toLowerCase() !== move.commitment.toLowerCase()) {
+        throw new Error("offer commitment does not match (ask, escalate, nonce) — rejecting move");
+      }
+      // Rounds dealt before this feature shipped (still in-flight across a redeploy) won't have these maps yet.
+      round.offerCommitments ??= {};
+      round.offerNonces ??= {};
+      round.offerCommitments[player] = move.commitment;
+      round.offerNonces[player] = move.nonce;
+    }
     round.offers[player] = move.ask;
     if (move.escalate) round.escalated[player] = true;
     state.acted[player] = true;
@@ -186,7 +200,7 @@ function applyMove(
       type: "OFFER_MADE",
       matchId: state.matchId,
       round: round.index,
-      payload: { player, ask: move.ask, escalate: !!move.escalate },
+      payload: { player, ask: move.ask, escalate: !!move.escalate, commitment: move.commitment },
       at: new Date().toISOString(),
     });
     if (bothActed(state)) {

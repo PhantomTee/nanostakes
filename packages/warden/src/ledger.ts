@@ -1,5 +1,6 @@
 import type { Address, Temperament } from "@nanostakes/shared";
 import { db } from "./db.js";
+import type { RoundBehaviorStats } from "./behaviorStats.js";
 
 export interface AgentRecord {
   address: Address;
@@ -12,12 +13,48 @@ export interface AgentRecord {
   totalReturned: number;
   /** totalReturned - totalStaked, across all matches. */
   netPnl: number;
+  /** Raw accumulators behind the derived behavior stats below — see behaviorStatsOf(). */
+  behaviorRounds: number;
+  claimSum: number;
+  concessionSum: number;
+  escalationCount: number;
+  fairShareGapSum: number;
+}
+
+export interface BehaviorStats {
+  /** 0..1: how far this agent's sealed asks move toward an even split vs digging in on their claim. */
+  concessionRate: number;
+  /** 0..1: fraction of resolved rounds in which this agent escalated the pot. */
+  escalationRate: number;
+  /** 0..1: average distance of this agent's public claim from an even 50/50 share. */
+  fairShareGap: number;
+  /** Brinkmanship rounds this is derived from; 0 means no signal yet. */
+  sampleSize: number;
+}
+
+/** Derived (not persisted) behavioral read on *how* an agent played, not just whether it won — see behaviorStats.ts. */
+export function behaviorStatsOf(rec: AgentRecord): BehaviorStats {
+  if (rec.behaviorRounds === 0) {
+    return { concessionRate: 0, escalationRate: 0, fairShareGap: 0, sampleSize: 0 };
+  }
+  return {
+    concessionRate: rec.concessionSum / rec.behaviorRounds,
+    escalationRate: rec.escalationCount / rec.behaviorRounds,
+    fairShareGap: rec.fairShareGapSum / rec.behaviorRounds,
+    sampleSize: rec.behaviorRounds,
+  };
 }
 
 const selectAgent = db.prepare("SELECT * FROM ledger_agents WHERE address = ?");
 const upsertAgent = db.prepare(`
-  INSERT INTO ledger_agents (address, temperament, matchesPlayed, wins, losses, ties, totalStaked, totalReturned, netPnl)
-  VALUES (@address, @temperament, @matchesPlayed, @wins, @losses, @ties, @totalStaked, @totalReturned, @netPnl)
+  INSERT INTO ledger_agents (
+    address, temperament, matchesPlayed, wins, losses, ties, totalStaked, totalReturned, netPnl,
+    behaviorRounds, claimSum, concessionSum, escalationCount, fairShareGapSum
+  )
+  VALUES (
+    @address, @temperament, @matchesPlayed, @wins, @losses, @ties, @totalStaked, @totalReturned, @netPnl,
+    @behaviorRounds, @claimSum, @concessionSum, @escalationCount, @fairShareGapSum
+  )
   ON CONFLICT(address) DO UPDATE SET
     temperament = excluded.temperament,
     matchesPlayed = excluded.matchesPlayed,
@@ -26,7 +63,12 @@ const upsertAgent = db.prepare(`
     ties = excluded.ties,
     totalStaked = excluded.totalStaked,
     totalReturned = excluded.totalReturned,
-    netPnl = excluded.netPnl
+    netPnl = excluded.netPnl,
+    behaviorRounds = excluded.behaviorRounds,
+    claimSum = excluded.claimSum,
+    concessionSum = excluded.concessionSum,
+    escalationCount = excluded.escalationCount,
+    fairShareGapSum = excluded.fairShareGapSum
 `);
 const selectAllAgents = db.prepare("SELECT * FROM ledger_agents");
 
@@ -42,6 +84,11 @@ function getOrCreate(address: Address): AgentRecord {
     totalStaked: 0,
     totalReturned: 0,
     netPnl: 0,
+    behaviorRounds: 0,
+    claimSum: 0,
+    concessionSum: 0,
+    escalationCount: 0,
+    fairShareGapSum: 0,
   };
 }
 
@@ -50,14 +97,19 @@ function getOrCreate(address: Address): AgentRecord {
  * each player's actual payout in USDC (what `settleMatch` paid out);
  * `staked` is what they put in. Win/loss/tie is relative to the other
  * player(s) in the same match by net PnL, not by raw payout size.
+ *
+ * `behaviorStats`, when provided (Brinkmanship only — see behaviorStats.ts),
+ * folds this match's per-round negotiation behavior into each player's
+ * running averages in the same write.
  */
 export function recordMatch(params: {
   players: Address[];
   staked: Record<Address, number>;
   returned: Record<Address, number>;
   temperaments?: Record<Address, Temperament>;
+  behaviorStats?: Record<Address, RoundBehaviorStats>;
 }): void {
-  const { players, staked, returned, temperaments } = params;
+  const { players, staked, returned, temperaments, behaviorStats } = params;
   const pnl: Record<Address, number> = {};
   for (const p of players) pnl[p] = (returned[p] ?? 0) - (staked[p] ?? 0);
 
@@ -77,6 +129,15 @@ export function recordMatch(params: {
       else if (tiesAll) rec.ties += 1;
       else rec.losses += 1;
 
+      const bs = behaviorStats?.[p];
+      if (bs) {
+        rec.behaviorRounds += bs.rounds;
+        rec.claimSum += bs.claimSum;
+        rec.concessionSum += bs.concessionSum;
+        rec.escalationCount += bs.escalationCount;
+        rec.fairShareGapSum += bs.fairShareGapSum;
+      }
+
       upsertAgent.run({ ...rec, temperament: rec.temperament ?? null });
     }
   });
@@ -95,14 +156,16 @@ export function standingOf(rec: AgentRecord): Standing {
 }
 
 /** Single-agent lookup for per-match badges — returns UNRANKED standing if the agent has no settled history yet. */
-export function getAgentRecord(address: Address): AgentRecord & { standing: Standing } {
+export function getAgentRecord(address: Address): AgentRecord & { standing: Standing; behavior: BehaviorStats } {
   const rec = getOrCreate(address);
-  return { ...rec, standing: standingOf(rec) };
+  return { ...rec, standing: standingOf(rec), behavior: behaviorStatsOf(rec) };
 }
 
-export function getLeaderboard(): Array<AgentRecord & { standing: Standing }> {
+export function getLeaderboard(): Array<AgentRecord & { standing: Standing; behavior: BehaviorStats }> {
   const rows = selectAllAgents.all() as AgentRecord[];
-  return rows.map((rec) => ({ ...rec, standing: standingOf(rec) })).sort((a, b) => b.netPnl - a.netPnl);
+  return rows
+    .map((rec) => ({ ...rec, standing: standingOf(rec), behavior: behaviorStatsOf(rec) }))
+    .sort((a, b) => b.netPnl - a.netPnl);
 }
 
 /** Aggregate stats grouped by temperament, across all agents that have played as that temperament. */

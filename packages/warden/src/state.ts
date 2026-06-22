@@ -115,6 +115,11 @@ function sanitizeBrinkmanshipForPlayer(record: MatchRecord, viewer: Address): un
       myValuation: round.privateValuation[viewer],
       claims: round.claims, // claims are public the moment they're made — only offers are sealed
       offers: sealed ? redactOthers(round.offers, viewer) : round.offers,
+      // Commitments are safe to reveal even while sealed — that's the point: a real cryptographic
+      // hash exists before either offer is known, not just a promise the server kept it hidden.
+      // (Default to {} — matches persisted before this feature shipped have no commitment data.)
+      offerCommitments: round.offerCommitments ?? {},
+      offerNonces: sealed ? redactOthers(round.offerNonces ?? {}, viewer) : round.offerNonces ?? {},
       escalated: round.escalated,
       messages: round.messages.filter((m) => m.from === viewer || m.to === viewer),
       resolved: round.resolved,
@@ -170,6 +175,8 @@ function sanitizeBrinkmanshipForSpectator(record: MatchRecord): unknown {
       cap: round.cap,
       claims: round.claims,
       offers: sealed ? redactAll(round.offers) : round.offers,
+      offerCommitments: round.offerCommitments ?? {},
+      offerNonces: sealed ? redactAll(round.offerNonces ?? {}) : round.offerNonces ?? {},
       escalated: round.escalated,
       messages: round.messages,
       resolved: round.resolved,

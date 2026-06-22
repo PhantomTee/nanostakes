@@ -18,11 +18,20 @@ takes their ask; tie means both get nothing. Play across 5 rounds against the sa
 and any side deals you make persist and are remembered.
 Respond ONLY with a single JSON object, no prose.`;
 
+/** What this agent remembers about this specific opponent from prior settled matches — see packages/warden/src/memory.ts. */
+export interface OpponentMemory {
+  matchesPlayed: number;
+  opponentAvgClaim: number;
+  opponentEscalationRate: number;
+  opponentConcessionRate: number;
+}
+
 interface NegotiateContext {
   round: number;
   myValuation: number;
   incomingMessages: Array<{ from: string; text: string }>;
   history: Array<{ round: number; myAsk?: number; oppAsk?: number; myReceived?: number }>;
+  opponentMemory?: OpponentMemory | null;
 }
 
 interface OfferContext {
@@ -32,6 +41,13 @@ interface OfferContext {
   opponentClaim: number | null;
   cap: number;
   basePot: number;
+  opponentMemory?: OpponentMemory | null;
+}
+
+/** Short enough to not blow up token cost — one sentence the LLM can act on, not a data dump. */
+function memorySummary(mem?: OpponentMemory | null): string {
+  if (!mem) return "";
+  return ` You've played this opponent ${mem.matchesPlayed} time(s) before: they escalate in ${(mem.opponentEscalationRate * 100).toFixed(0)}% of rounds, claim an average of ${mem.opponentAvgClaim.toFixed(2)}, and concede toward a fair split ${(mem.opponentConcessionRate * 100).toFixed(0)}% of the way when asked.`;
 }
 
 export interface NegotiateDecision {
@@ -77,7 +93,7 @@ export class TemperamentAgent {
   async decideNegotiate(ctx: NegotiateContext): Promise<NegotiateDecision> {
     const user = `Round ${ctx.round}. Your private valuation: ${ctx.myValuation.toFixed(2)}.
 Messages from opponent this round: ${JSON.stringify(ctx.incomingMessages)}.
-Match history so far: ${JSON.stringify(ctx.history)}.
+Match history so far: ${JSON.stringify(ctx.history)}.${memorySummary(ctx.opponentMemory)}
 Decide: optionally a short message to send your opponent, and your public claim (0..1).
 Respond as JSON: {"message": "<string or omit>", "claim": <number 0..1>}`;
     const parsed = await this.complete(user);
@@ -88,7 +104,7 @@ Respond as JSON: {"message": "<string or omit>", "claim": <number 0..1>}`;
 
   async decideOffer(ctx: OfferContext): Promise<OfferDecision> {
     const user = `Round ${ctx.round}. Your private valuation: ${ctx.myValuation.toFixed(2)}. Your public claim was ${ctx.myClaim}.
-Opponent's public claim: ${ctx.opponentClaim ?? "unknown"}. Base pot: $${ctx.basePot}, this round's cap if escalated: $${ctx.cap}.
+Opponent's public claim: ${ctx.opponentClaim ?? "unknown"}. Base pot: $${ctx.basePot}, this round's cap if escalated: $${ctx.cap}.${memorySummary(ctx.opponentMemory)}
 Decide your sealed ask (0..1 fraction of the pot) and whether to escalate the pot toward the cap.
 Respond as JSON: {"ask": <number 0..1>, "escalate": <true|false>}`;
     const parsed = await this.complete(user);

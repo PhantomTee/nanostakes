@@ -15,7 +15,8 @@
     "web": "npm run dev --workspace=@nanostakes/web",
     "contender": "npm run dev --workspace=@nanostakes/contender",
     "onboard": "tsx scripts/onboard.ts",
-    "match": "tsx scripts/run-match.ts"
+    "match": "tsx scripts/run-match.ts",
+    "demo": "tsx scripts/demo-simulation.ts"
   },
   "devDependencies": {
     "typescript": "^5.7.3",

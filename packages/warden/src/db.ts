@@ -54,4 +54,38 @@ db.exec(`
     data TEXT NOT NULL,
     createdAt TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS agent_memory (
+    selfAddress TEXT NOT NULL,
+    opponentAddress TEXT NOT NULL,
+    matchesPlayed INTEGER NOT NULL DEFAULT 0,
+    rounds INTEGER NOT NULL DEFAULT 0,
+    claimSum REAL NOT NULL DEFAULT 0,
+    concessionSum REAL NOT NULL DEFAULT 0,
+    escalationCount INTEGER NOT NULL DEFAULT 0,
+    lastUpdated TEXT NOT NULL,
+    PRIMARY KEY (selfAddress, opponentAddress)
+  );
 `);
+
+/**
+ * Behavior-stat columns (Feature 1: derived reasoning-quality stats) were
+ * added after ledger_agents already existed in production. better-sqlite3's
+ * bundled SQLite reports 3.49.2 but its parser doesn't actually accept
+ * `ADD COLUMN IF NOT EXISTS` (confirmed empirically, not just a version
+ * check), so migrate by inspecting existing columns instead and only adding
+ * the ones missing — this lets a redeploy migrate an existing DB file in
+ * place rather than needing a destructive migration step.
+ */
+function ensureColumn(table: string, column: string, columnDef: string): void {
+  const existing = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!existing.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${columnDef}`);
+  }
+}
+
+ensureColumn("ledger_agents", "behaviorRounds", "behaviorRounds INTEGER NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "claimSum", "claimSum REAL NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "concessionSum", "concessionSum REAL NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "escalationCount", "escalationCount INTEGER NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "fairShareGapSum", "fairShareGapSum REAL NOT NULL DEFAULT 0");

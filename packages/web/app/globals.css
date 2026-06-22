@@ -294,6 +294,7 @@ hr.hairline { border: none; border-top: 2px solid var(--line); margin: 0; }
   box-shadow: 8px 8px 0 0 var(--ink);
 }
 .section.on-paper .ledger-card { background: var(--bg); color: var(--text); box-shadow: 8px 8px 0 0 var(--yellow); }
+.ledger-scroll { overflow-x: auto; }
 table.ledger { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
 table.ledger th, table.ledger td { text-align: left; padding: 10px 12px; }
 table.ledger thead th {
@@ -491,6 +492,18 @@ select, input {
 
 .tx-link { color: var(--stamp); text-decoration: none; word-break: break-all; }
 .tx-link:hover { text-decoration: underline; }
+
+/* ---------- Concourse: offer commit-reveal ---------- */
+.commit-hash {
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted);
+  border: 1px dashed var(--text-muted); border-radius: 999px; padding: 1px 8px; margin-left: 8px;
+}
+.verify-ok, .verify-bad {
+  font-family: var(--font-mono); font-size: 0.72rem; font-weight: 700; border-radius: 999px;
+  padding: 1px 8px; margin-left: 8px; border: 2px solid currentColor;
+}
+.verify-ok { color: var(--settle); }
+.verify-bad { color: var(--stamp); }
 
 /* ---------- Concourse: live event feed ---------- */
 .feed-panel {

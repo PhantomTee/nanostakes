@@ -1,7 +1,8 @@
+import { randomBytes } from "node:crypto";
 import { GatewayClient } from "@circle-fin/x402-batching/client";
 import type { Hex } from "viem";
-import type { Temperament } from "@nanostakes/shared";
-import { TemperamentAgent, type AgentProviders } from "./agent.js";
+import { computeOfferCommitment, type Temperament } from "@nanostakes/shared";
+import { TemperamentAgent, type AgentProviders, type OpponentMemory } from "./agent.js";
 import { shouldAcceptChallenge, type OpponentRecord } from "./challengePolicy.js";
 
 export interface DriveAgentOptions {
@@ -41,6 +42,14 @@ async function getState(wardenUrl: string, matchId: string, as: string) {
   const res = await fetch(`${wardenUrl}/match/${matchId}/state?as=${as}`);
   if (!res.ok) throw new Error(`getState failed: ${res.status} ${await res.text()}`);
   return res.json() as Promise<any>;
+}
+
+/** What this agent has learned about a specific opponent from prior settled matches — null if never played before. */
+async function fetchOpponentMemory(wardenUrl: string, self: string, opponent: string): Promise<OpponentMemory | null> {
+  const res = await fetch(`${wardenUrl}/agents/memory?self=${self}&opponent=${opponent}`);
+  if (!res.ok) return null;
+  const { memory } = (await res.json()) as { memory: OpponentMemory | null };
+  return memory;
 }
 
 async function postMove(wardenUrl: string, matchId: string, player: string, move: unknown) {
@@ -152,6 +161,14 @@ async function playMatch(
   );
   log(`${agent.name} staked entry for match ${matchId} (${stakePayment.transaction})`);
 
+  const opponentAddress = opponentOf(preStakeState, me);
+  const opponentMemory = await fetchOpponentMemory(wardenUrl, me, opponentAddress);
+  if (opponentMemory) {
+    log(
+      `${agent.name} recalls ${opponentMemory.matchesPlayed} prior match(es) with ${opponentAddress.slice(0, 8)}… (escalates ${(opponentMemory.opponentEscalationRate * 100).toFixed(0)}%, concedes ${(opponentMemory.opponentConcessionRate * 100).toFixed(0)}%) — folding into prompt`,
+    );
+  }
+
   while (!isStopped?.()) {
     const state = await getState(wardenUrl, matchId, me);
     if (state.status === "SETTLED") {
@@ -183,6 +200,7 @@ async function playMatch(
         myValuation: round.myValuation,
         incomingMessages: incoming.map((m: any) => ({ from: m.from, text: m.text })),
         history: buildHistory(state, me),
+        opponentMemory,
       });
       if (decision.message) {
         await postMove(wardenUrl, matchId, me, { type: "message", to: opponentOf(state, me), text: decision.message });
@@ -198,11 +216,22 @@ async function playMatch(
         opponentClaim: round.claims[opp] ?? null,
         cap: round.cap,
         basePot: round.basePot,
+        opponentMemory,
       });
+      // Commit-reveal: fix the offer to a hash before submitting it, so the
+      // commitment (safe to show while sealed) proves the value couldn't
+      // have been picked after seeing the opponent's — not just the
+      // server's word that it kept the offer hidden. Sent in the same
+      // request as the real value since the Warden has no separate
+      // "commit" step to round-trip through.
+      const nonce: Hex = `0x${randomBytes(32).toString("hex")}`;
+      const commitment = computeOfferCommitment(decision.ask, !!decision.escalate, nonce);
       const result = await postMove(wardenUrl, matchId, me, {
         type: "offer",
         ask: decision.ask,
         escalate: decision.escalate,
+        commitment,
+        nonce,
       });
       log(`${agent.name} offers ${decision.ask.toFixed(2)}${decision.escalate ? " (escalate)" : ""} in round ${round.index}`);
       if (result.settled) {

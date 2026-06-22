@@ -1,10 +1,13 @@
 import type { Hex } from "viem";
 import type { Address } from "@nanostakes/shared";
 import { getGame } from "@nanostakes/bracket";
+import type { BrinkmanshipState } from "@nanostakes/bracket";
 import type { MatchRecord } from "./state.js";
 import { persistMatch } from "./state.js";
 import { wardenGatewayClient } from "./gateway.js";
 import { recordMatch } from "./ledger.js";
+import { computeBrinkmanshipRoundStats } from "./behaviorStats.js";
+import { recordOpponentMemory } from "./memory.js";
 
 /**
  * Circle Gateway settles x402 payments in batches, so funds from `/stake`
@@ -68,12 +71,24 @@ export async function settleMatch(record: MatchRecord): Promise<Record<Address, 
   record.payoutTxs = txs;
   persistMatch(record);
 
+  // Brinkmanship-only: Standoff's single sealed commit has no claim/offer
+  // structure for behaviorStats.ts to derive concession/escalation/fair-share
+  // from, so neither the leaderboard's behavior columns nor cross-match
+  // memory get populated for it.
+  const behaviorStats =
+    record.gameId === "brinkmanship" ? computeBrinkmanshipRoundStats(record.state as BrinkmanshipState) : undefined;
+
   recordMatch({
     players: record.state.players,
     staked: Object.fromEntries(record.state.players.map((p) => [p, record.state.entryStakeEach])),
     returned: Object.fromEntries(amounts.map(({ player, amount }) => [player, amount])),
     temperaments: record.meta?.temperaments,
+    behaviorStats,
   });
+
+  if (behaviorStats && record.state.players.length === 2) {
+    recordOpponentMemory(record.state.players as [Address, Address], behaviorStats);
+  }
 
   return txs;
 }
