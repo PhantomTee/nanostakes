@@ -46,4 +46,12 @@ db.exec(`
     txn TEXT NOT NULL,
     at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS matches (
+    matchId TEXT PRIMARY KEY,
+    gameId TEXT NOT NULL,
+    status TEXT NOT NULL,
+    data TEXT NOT NULL,
+    createdAt TEXT NOT NULL
+  );
 `);

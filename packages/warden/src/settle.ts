@@ -2,6 +2,7 @@ import type { Hex } from "viem";
 import type { Address } from "@nanostakes/shared";
 import { getGame } from "@nanostakes/bracket";
 import type { MatchRecord } from "./state.js";
+import { persistMatch } from "./state.js";
 import { wardenGatewayClient } from "./gateway.js";
 import { recordMatch } from "./ledger.js";
 
@@ -65,6 +66,7 @@ export async function settleMatch(record: MatchRecord): Promise<Record<Address, 
 
   record.status = "SETTLED";
   record.payoutTxs = txs;
+  persistMatch(record);
 
   recordMatch({
     players: record.state.players,

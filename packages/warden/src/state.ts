@@ -1,6 +1,7 @@
 import type { Address, EngineEvent, Temperament } from "@nanostakes/shared";
 import { getGame } from "@nanostakes/bracket";
 import type { BrinkmanshipState, StandoffState } from "@nanostakes/bracket";
+import { db } from "./db.js";
 
 export type MatchStatus = "AWAITING_STAKES" | "ACTIVE" | "SETTLED";
 
@@ -14,9 +15,41 @@ export interface MatchRecord {
   stakeTxs?: Record<Address, string>;
   /** Optional caller-supplied metadata (e.g. each player's temperament) — the Warden has no other way to know this, it just tags it onto the ledger. */
   meta?: { temperaments?: Record<Address, Temperament> };
+  createdAt?: string;
 }
 
 const matches = new Map<string, MatchRecord>();
+
+const upsertMatchStmt = db.prepare(
+  `INSERT INTO matches (matchId, gameId, status, data, createdAt) VALUES (?, ?, ?, ?, ?)
+   ON CONFLICT(matchId) DO UPDATE SET status = excluded.status, data = excluded.data`,
+);
+
+/**
+ * Match state lives in-memory for the hot path (every move mutates it
+ * directly), but is mirrored to SQLite on every write so match history
+ * survives a server restart. Without this, every redeploy silently wiped
+ * Concourse's "watch any match" picker back to empty.
+ */
+export function persistMatch(record: MatchRecord): void {
+  upsertMatchStmt.run(
+    record.state.matchId,
+    record.gameId,
+    record.status,
+    JSON.stringify(record),
+    record.createdAt ?? new Date().toISOString(),
+  );
+}
+
+function hydrateMatchesFromDb(): void {
+  const rows = db.prepare(`SELECT data FROM matches`).all() as { data: string }[];
+  for (const row of rows) {
+    const record = JSON.parse(row.data) as MatchRecord;
+    matches.set(record.state.matchId, record);
+  }
+}
+
+hydrateMatchesFromDb();
 
 export function createMatch(
   gameId: string,
@@ -37,8 +70,10 @@ export function createMatch(
     staked: Object.fromEntries(players.map((p) => [p, false])),
     events: [],
     meta,
+    createdAt: new Date().toISOString(),
   };
   matches.set(state.matchId, record);
+  persistMatch(record);
   return record;
 }
 
@@ -161,5 +196,5 @@ function redactAll<T>(rec: Record<Address, T>): Record<Address, null> {
 }
 
 export function allMatches(): MatchRecord[] {
-  return [...matches.values()];
+  return [...matches.values()].sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
 }

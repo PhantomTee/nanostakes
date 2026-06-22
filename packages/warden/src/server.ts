@@ -5,7 +5,7 @@ import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batchin
 import { formatUnits, type Hex } from "viem";
 import { ENTRY_STAKE_EACH, getGame } from "@nanostakes/bracket";
 import { gateway, wardenAccount } from "./gateway.js";
-import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, type MatchRecord } from "./state.js";
+import { createMatch, getMatch, allMatches, sanitizeForPlayer, sanitizeForSpectator, persistMatch, type MatchRecord } from "./state.js";
 import { settleMatch } from "./settle.js";
 import { getLeaderboard, getTemperamentStats, getAgentRecord } from "./ledger.js";
 import { joinQueue, pollAssignment, queueStatus } from "./matchmaking.js";
@@ -393,6 +393,7 @@ app.post(
     if (record.state.players.every((p) => record.staked[p])) {
       record.status = "ACTIVE";
     }
+    persistMatch(record);
     emitConcourseEvent({
       type: "match.staked",
       matchId: record.state.matchId,
@@ -503,6 +504,7 @@ app.post("/match/:id/move", async (req: Request, res: Response) => {
     const { state, events } = game.applyMove(record.state, player, move as never);
     record.state = state as MatchRecord["state"];
     record.events.push(...events);
+    persistMatch(record);
 
     emitConcourseEvent({
       type: "match.move",
