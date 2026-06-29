@@ -36,7 +36,7 @@ const WITHDRAW_CHAINS: { value: string; label: string }[] = [
 ];
 
 export default function AgentsApp() {
-  const { address: owner, connecting, error: connectError, connect } = useWallet();
+  const { address: owner, connecting, error: connectError, connect, sendUsdc } = useWallet();
   const [agents, setAgents] = useState<OwnedAgent[]>([]);
   const [name, setName] = useState("");
   const [temperament, setTemperament] = useState<Temperament>("NEUTRAL");
@@ -48,6 +48,9 @@ export default function AgentsApp() {
   const [challengeTarget, setChallengeTarget] = useState<Record<string, string>>({});
   const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
   const [eurcBalances, setEurcBalances] = useState<Record<string, string>>({});
+  const [fundAmount, setFundAmount] = useState<Record<string, string>>({});
+  const [sendingId, setSendingId] = useState<string | null>(null);
+  const [sendNote, setSendNote] = useState<Record<string, string>>({});
 
   const refresh = useCallback(async (ownerAddr: string) => {
     const res = await fetch(apiUrl(`/agents?owner=${ownerAddr}`));
@@ -141,6 +144,24 @@ export default function AgentsApp() {
       setActionError((err as Error).message);
     } finally {
       setCreating(false);
+    }
+  }
+
+  async function sendUsdcToAgent(agent: OwnedAgent) {
+    const amount = fundAmount[agent.id]?.trim() || "5";
+    setSendingId(agent.id);
+    setActionError(null);
+    setSendNote((prev) => ({ ...prev, [agent.id]: "" }));
+    try {
+      const txHash = await sendUsdc(agent.sessionAddress, amount);
+      setSendNote((prev) => ({
+        ...prev,
+        [agent.id]: `Sent ${amount} USDC (${txHash.slice(0, 10)}…). Give it a few seconds to confirm, then click Fund.`,
+      }));
+    } catch (err) {
+      setActionError((err as Error).message);
+    } finally {
+      setSendingId(null);
     }
   }
 
@@ -265,11 +286,36 @@ export default function AgentsApp() {
                       ) : null}
                       <p style={{ color: "var(--text-muted)", fontSize: "0.78rem", margin: "8px 0" }}>
                         {agent.status === "FUNDING"
-                          ? "Send testnet USDC to the session wallet above, then click Fund."
+                          ? "Send testnet USDC to the session wallet — directly from your connected wallet below, or any other wallet — then click Fund."
                           : agent.status === "ACTIVE"
                             ? "Playing autonomously. Withdraw at any time to cash out and pause it."
                             : "Paused. Resume to put it back in the queue, or send more USDC and fund again."}
                       </p>
+                      {agent.status === "FUNDING" || agent.status === "PAUSED" ? (
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="5"
+                            value={fundAmount[agent.id] ?? ""}
+                            onChange={(e) => setFundAmount((prev) => ({ ...prev, [agent.id]: e.target.value }))}
+                            style={{ width: 80, fontSize: "0.78rem" }}
+                          />
+                          <button
+                            className="btn btn--ghost"
+                            type="button"
+                            disabled={sendingId === agent.id || !owner}
+                            onClick={() => sendUsdcToAgent(agent)}
+                            style={{ fontSize: "0.78rem" }}
+                          >
+                            {sendingId === agent.id ? "Sending…" : "Send USDC from my wallet"}
+                          </button>
+                        </div>
+                      ) : null}
+                      {sendNote[agent.id] ? (
+                        <p style={{ color: "var(--wire)", fontSize: "0.76rem", margin: "0 0 8px" }}>{sendNote[agent.id]}</p>
+                      ) : null}
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                         {agent.status === "FUNDING" || agent.status === "PAUSED" ? (
                           <button

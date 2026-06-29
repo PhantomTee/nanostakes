@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { encodeFunctionData, erc20Abi, parseUnits } from "viem";
 
 declare global {
   interface Window {
@@ -14,12 +15,25 @@ declare global {
 
 const STORAGE_KEY = "nanostakes:wallet";
 
+/** Mirrors @nanostakes/shared's ARC_TESTNET — duplicated rather than imported,
+ *  since the web package otherwise has no dependency on that package (see
+ *  ConcourseApp.tsx's computeOfferCommitment for the same convention). */
+const ARC_TESTNET_CHAIN_ID_HEX = "0x4cef52"; // 5042002
+const ARC_TESTNET_RPC = "https://rpc.testnet.arc.network";
+const ARC_TESTNET_EXPLORER = "https://testnet.arcscan.app";
+const USDC_ADDRESS = "0x3600000000000000000000000000000000000000";
+
 interface WalletContextValue {
   address: string | null;
   connecting: boolean;
   error: string | null;
   connect: () => Promise<void>;
   disconnect: () => void;
+  /** Sends `amountUsdc` (a decimal string, e.g. "5") of testnet USDC from the
+   *  connected wallet to `to`, switching/adding Arc Testnet first if needed.
+   *  Resolves with the tx hash once the wallet has submitted it — this does
+   *  NOT wait for on-chain confirmation. */
+  sendUsdc: (to: string, amountUsdc: string) => Promise<string>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -71,8 +85,50 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     window.localStorage.removeItem(STORAGE_KEY);
   }, []);
 
+  const sendUsdc = useCallback(
+    async (to: string, amountUsdc: string) => {
+      if (!window.ethereum) throw new Error("No wallet extension found. Install MetaMask (or any injected wallet) and reload.");
+      if (!address) throw new Error("Connect your wallet first.");
+      try {
+        await window.ethereum.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: ARC_TESTNET_CHAIN_ID_HEX }],
+        });
+      } catch (err) {
+        // 4902 = chain not added to the wallet yet — add it, then retry the switch.
+        if ((err as { code?: number }).code === 4902) {
+          await window.ethereum.request({
+            method: "wallet_addEthereumChain",
+            params: [
+              {
+                chainId: ARC_TESTNET_CHAIN_ID_HEX,
+                chainName: "Arc Testnet",
+                nativeCurrency: { name: "USDC", symbol: "USDC", decimals: 18 },
+                rpcUrls: [ARC_TESTNET_RPC],
+                blockExplorerUrls: [ARC_TESTNET_EXPLORER],
+              },
+            ],
+          });
+        } else {
+          throw err;
+        }
+      }
+      const data = encodeFunctionData({
+        abi: erc20Abi,
+        functionName: "transfer",
+        args: [to as `0x${string}`, parseUnits(amountUsdc, 6)],
+      });
+      const txHash = (await window.ethereum.request({
+        method: "eth_sendTransaction",
+        params: [{ from: address, to: USDC_ADDRESS, data }],
+      })) as string;
+      return txHash;
+    },
+    [address],
+  );
+
   return (
-    <WalletContext.Provider value={{ address, connecting, error, connect, disconnect }}>
+    <WalletContext.Provider value={{ address, connecting, error, connect, disconnect, sendUsdc }}>
       {children}
     </WalletContext.Provider>
   );
