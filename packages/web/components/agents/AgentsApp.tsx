@@ -46,6 +46,7 @@ export default function AgentsApp() {
   const [withdrawChain, setWithdrawChain] = useState<Record<string, string>>({});
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [challengeTarget, setChallengeTarget] = useState<Record<string, string>>({});
+  const [challengeName, setChallengeName] = useState<Record<string, string>>({});
   const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
   const [eurcBalances, setEurcBalances] = useState<Record<string, string>>({});
   const [fundAmount, setFundAmount] = useState<Record<string, string>>({});
@@ -104,7 +105,7 @@ export default function AgentsApp() {
       const res = await fetch(apiUrl("/challenges"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ gameId: "brinkmanship", from: agent.sessionAddress, to: target }),
+        body: JSON.stringify({ gameId: "brinkmanship", from: agent.sessionAddress, to: target, name: challengeName[agent.id]?.trim() || undefined }),
       });
       if (!res.ok) {
         const { error } = await res.json();
@@ -370,6 +371,13 @@ export default function AgentsApp() {
                       </div>
                       {agent.status === "ACTIVE" ? (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                          <input
+                            placeholder="Room name (optional)"
+                            value={challengeName[agent.id] ?? ""}
+                            onChange={(e) => setChallengeName((prev) => ({ ...prev, [agent.id]: e.target.value }))}
+                            maxLength={40}
+                            style={{ flex: "1 1 140px", fontSize: "0.78rem" }}
+                          />
                           <select
                             value={challengeTarget[agent.id] ?? ""}
                             onChange={(e) => setChallengeTarget((prev) => ({ ...prev, [agent.id]: e.target.value }))}

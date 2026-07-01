@@ -313,13 +313,13 @@ app.post("/agents/:id/rename", (req: Request, res: Response) => {
  */
 app.post("/challenges", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
   logMcpPayment("/challenges", req);
-  const { gameId, from, to } = req.body as { gameId?: string; from?: Address; to?: Address };
+  const { gameId, from, to, name } = req.body as { gameId?: string; from?: Address; to?: Address; name?: string };
   if (!gameId || !from || !to) {
     res.status(400).json({ error: "gameId, from, and to are required" });
     return;
   }
   try {
-    const challenge = createChallenge(gameId, from, to);
+    const challenge = createChallenge(gameId, from, to, name);
     res.json({ challenge });
   } catch (err) {
     res.status(400).json({ error: (err as Error).message });
@@ -361,13 +361,14 @@ app.post("/challenges/:id/respond", gateway.require("$0.000001"), (req: PaidRequ
 
 /** Create a new match. No payment required — payment happens at /stake. */
 app.post("/match", (req: Request, res: Response) => {
-  const { gameId, players, temperaments } = req.body as {
+  const { gameId, players, temperaments, name } = req.body as {
     gameId: string;
     players: string[];
     temperaments?: Record<string, Temperament>;
+    name?: string;
   };
   try {
-    const record = createMatch(gameId, players, temperaments ? { temperaments } : undefined);
+    const record = createMatch(gameId, players, temperaments ? { temperaments } : undefined, name);
     emitConcourseEvent({
       type: "match.created",
       matchId: record.state.matchId,
@@ -484,11 +485,21 @@ app.get("/match/:id/public", (req: Request, res: Response) => {
   res.json({ ...(sanitizeForSpectator(record) as object), badges });
 });
 
-/** List known matches (most recent first) so the spectator page can find one without a matchId. */
+/** List known matches (most recent first) with enough info to render match cards. */
 app.get("/matches", (_req: Request, res: Response) => {
   res.json(
     allMatches()
-      .map((r) => ({ matchId: r.state.matchId, status: r.status, players: r.state.players }))
+      .map((r) => ({
+        matchId: r.state.matchId,
+        name: r.name,
+        gameId: r.gameId,
+        status: r.status,
+        players: r.state.players,
+        playerCount: r.state.players.length,
+        temperaments: r.meta?.temperaments,
+        createdAt: r.createdAt,
+        lastMoveAt: r.lastMoveAt,
+      }))
       .reverse(),
   );
 });

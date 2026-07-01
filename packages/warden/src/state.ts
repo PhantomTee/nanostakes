@@ -13,6 +13,8 @@ export interface MatchRecord {
   events: EngineEvent[];
   payoutTxs?: Record<Address, string>;
   stakeTxs?: Record<Address, string>;
+  /** Human-readable room name — set by the challenger or auto-generated from gameId + short matchId. */
+  name?: string;
   /** Optional caller-supplied metadata (e.g. each player's temperament) — the Warden has no other way to know this, it just tags it onto the ledger. */
   meta?: { temperaments?: Record<Address, Temperament> };
   createdAt?: string;
@@ -58,6 +60,7 @@ export function createMatch(
   gameId: string,
   players: Address[],
   meta?: MatchRecord["meta"],
+  name?: string,
 ): MatchRecord {
   const game = getGame(gameId);
   if (players.length < game.manifest.minPlayers || players.length > game.manifest.maxPlayers) {
@@ -66,12 +69,14 @@ export function createMatch(
     );
   }
   const state = game.initState(players) as BrinkmanshipState | StandoffState | PromptWarState | PromptInjectionState;
+  const autoName = `${gameId.charAt(0).toUpperCase()}${gameId.slice(1)} #${state.matchId.slice(0, 4).toUpperCase()}`;
   const record: MatchRecord = {
     gameId,
     status: "AWAITING_STAKES",
     state,
     staked: Object.fromEntries(players.map((p) => [p, false])),
     events: [],
+    name: name ?? autoName,
     meta,
     createdAt: new Date().toISOString(),
   };

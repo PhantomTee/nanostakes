@@ -13,6 +13,8 @@ export interface Challenge {
   status: ChallengeStatus;
   createdAt: number;
   matchId?: string;
+  /** Room name set by the challenger, carried to the match on acceptance. */
+  name?: string;
 }
 
 const CHALLENGE_TTL_MS = 5 * 60_000;
@@ -25,12 +27,12 @@ function expireStale(): void {
   }
 }
 
-/** Issue a challenge from one agent to a specific opponent, naming who plays, not a blind queue draw. */
-export function createChallenge(gameId: string, from: Address, to: Address): Challenge {
+/** Issue a challenge from one agent to a specific opponent. The challenger may supply a room name. */
+export function createChallenge(gameId: string, from: Address, to: Address, name?: string): Challenge {
   if (from.toLowerCase() === to.toLowerCase()) {
     throw new Error("cannot challenge yourself");
   }
-  const challenge: Challenge = { id: randomUUID(), gameId, from, to, status: "PENDING", createdAt: Date.now() };
+  const challenge: Challenge = { id: randomUUID(), gameId, from, to, status: "PENDING", createdAt: Date.now(), name };
   challenges.set(challenge.id, challenge);
   return challenge;
 }
@@ -66,7 +68,7 @@ export function respondToChallenge(challengeId: string, responder: Address, acce
     return challenge;
   }
 
-  const record = createMatch(challenge.gameId, [challenge.from, challenge.to]);
+  const record = createMatch(challenge.gameId, [challenge.from, challenge.to], undefined, challenge.name);
   challenge.status = "ACCEPTED";
   challenge.matchId = record.state.matchId;
   assignMatch(challenge.from, record.state.matchId);
