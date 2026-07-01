@@ -59,7 +59,6 @@ export default function Header({ active }: { active?: string }) {
             </svg>
           </span>
           <b>NANOSTAKES</b>
-          <i>&gt;ARENA</i>
         </Link>
 
         <div className="topbar-actions">

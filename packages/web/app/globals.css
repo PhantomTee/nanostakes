@@ -39,7 +39,7 @@
 }
 
 * { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; overflow-x: clip; }
 body {
   margin: 0;
   background: var(--bg);
@@ -771,6 +771,19 @@ select { min-width: 0; max-width: 100%; }
 /* Topbar blur background — hardcoded rgba in light mode CSS; override for dark */
 [data-theme="dark"] .topbar {
   background: rgba(14, 14, 12, 0.92);
+}
+
+/* Ticker: always stays dark — its visual design (dark band, yellow text) is
+   intentional and should NOT invert in dark mode even though --ink flips to light. */
+[data-theme="dark"] .ticker {
+  background: #0e0e0c;
+  border-color: #2a2a26;
+}
+[data-theme="dark"] .ticker__track {
+  color: var(--yellow);  /* yellow on dark — correct, intentional */
+}
+[data-theme="dark"] .ticker__track span {
+  color: #5a5a54;
 }
 
 /* Scrollbar thumb colour in dark mode */

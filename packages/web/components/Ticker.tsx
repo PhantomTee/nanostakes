@@ -18,8 +18,11 @@ export default function Ticker() {
         const ledger = ledgerRes.ok ? await ledgerRes.json() : { leaderboard: [] };
         if (cancelled) return;
         const parts: string[] = [];
-        for (const m of matches.slice(0, 6)) {
-          parts.push(`MATCH ${m.matchId.slice(0, 8)}&hellip; &middot; ${m.status} &middot; ${m.players.length} CONTENDERS`);
+        const matchList = Array.isArray(matches) ? matches : (matches.matches ?? []);
+        for (const m of matchList.slice(0, 6)) {
+          const mid = (m.matchId ?? m.state?.matchId ?? m.id ?? "").slice(0, 8);
+          const count = m.players?.length ?? m.state?.players?.length ?? 2;
+          parts.push(`MATCH ${mid}&hellip; &middot; ${m.status ?? "ACTIVE"} &middot; ${count} CONTENDERS`);
         }
         for (const a of ledger.leaderboard.slice(0, 4)) {
           const sign = a.netPnl >= 0 ? "+" : "";

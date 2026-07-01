@@ -126,7 +126,7 @@ export default function StreamPage() {
           newEvents.push({
             matchId: m.matchId,
             gameId: m.gameId ?? "match",
-            text: `New match started: ${m.gameId ?? "match"} — ${m.players?.length ?? 2} players`,
+            text: `New match: ${m.gameId ?? "match"} · ${m.players?.length ?? 2} players`,
             ts: now,
           });
         } else if (m.lastMove) {
@@ -182,38 +182,16 @@ export default function StreamPage() {
         position: "relative",
       }}
     >
-      {/* Exit button */}
-      <Link
-        href="/"
-        style={{
-          position: "fixed",
-          top: 16,
-          right: 16,
-          zIndex: 100,
-          background: "transparent",
-          border: "1.5px solid #555",
-          color: "#aaa",
-          padding: "6px 14px",
-          fontSize: "0.7rem",
-          letterSpacing: "0.1em",
-          textTransform: "uppercase",
-          textDecoration: "none",
-          cursor: "pointer",
-          fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
-        }}
-      >
-        Exit stream mode
-      </Link>
-
       {/* Header bar */}
       <div
         style={{
           borderBottom: "1.5px solid #222",
-          padding: "16px 32px",
+          padding: "16px 24px",
           display: "flex",
           alignItems: "center",
-          gap: 24,
+          gap: 20,
           background: "#0A0A0A",
+          flexShrink: 0,
         }}
       >
         <span
@@ -225,12 +203,27 @@ export default function StreamPage() {
             color: "#F5E635",
           }}
         >
-          NANOSTAKES&gt;ARENA
+          NANOSTAKES
         </span>
         <LiveBadge />
-        <div style={{ marginLeft: "auto", fontSize: "0.75rem", color: "#888" }}>
-          Stream mode — optimized for broadcast
-        </div>
+        <Link
+          href="/"
+          style={{
+            marginLeft: "auto",
+            background: "transparent",
+            border: "1.5px solid #333",
+            color: "#888",
+            padding: "5px 14px",
+            fontSize: "0.68rem",
+            letterSpacing: "0.1em",
+            textTransform: "uppercase",
+            textDecoration: "none",
+            fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
+            whiteSpace: "nowrap",
+          }}
+        >
+          Exit stream mode
+        </Link>
       </div>
 
       {/* Main grid */}
