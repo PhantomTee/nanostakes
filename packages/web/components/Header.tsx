@@ -9,7 +9,13 @@ const NAV = [
   { href: "/concourse", label: "Concourse" },
   { href: "/ledger", label: "Ledger" },
   { href: "/agents", label: "Agents" },
+  { href: "/tournaments", label: "Tournaments" },
+  { href: "/tutorial", label: "Tutorial" },
   { href: "/how-it-works", label: "How it works" },
+] as const;
+
+const NAV_EXTERNAL = [
+  { href: "/stream", label: "Stream", target: "_blank" as const },
 ] as const;
 
 function short(address: string) {
@@ -72,6 +78,11 @@ export default function Header({ active }: { active?: string }) {
             <Link key={item.href} href={item.href} className={active === item.href ? "is-active" : undefined}>
               {item.label}
             </Link>
+          ))}
+          {NAV_EXTERNAL.map((item) => (
+            <a key={item.href} href={item.href} target={item.target} rel="noopener noreferrer">
+              {item.label}
+            </a>
           ))}
           {active === "/" ? <WardenStatus /> : null}
           <ConnectWalletButton />

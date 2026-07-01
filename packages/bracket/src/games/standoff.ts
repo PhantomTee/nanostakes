@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Address, EngineEvent, GameEngine, GameManifest, MatchResult, MatchState } from "@nanostakes/shared";
+import type { Address, BrokerSeat, EngineEvent, GameEngine, GameManifest, MatchResult, MatchState } from "@nanostakes/shared";
 
 /** One-shot simultaneous-commit Prisoner's-Dilemma-style stake split — proves the Bracket plugin pattern generalizes past Brinkmanship's multi-round structure. */
 export const ENTRY_STAKE_EACH = 2.5;
@@ -31,9 +31,10 @@ const manifest: GameManifest = {
   maxPlayers: 2,
 };
 
-function initState(players: Address[]): StandoffState {
+function initState(players: Address[], opts?: Record<string, unknown>): StandoffState {
   if (players.length !== 2) throw new Error("Standoff requires exactly 2 players");
   const [a, b] = players;
+  const stakeAsset = (opts?.stakeAsset as "USDC" | "EURC") ?? "USDC";
   return {
     matchId: randomUUID(),
     players,
@@ -44,6 +45,8 @@ function initState(players: Address[]): StandoffState {
     phase: "NEGOTIATE",
     acted: { [a]: false, [b]: false },
     choices: { [a]: undefined, [b]: undefined },
+    stakeAsset,
+    broker: opts?.broker as BrokerSeat | undefined,
   };
 }
 

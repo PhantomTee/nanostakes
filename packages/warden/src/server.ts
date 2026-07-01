@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { randomUUID } from "node:crypto";
 import express from "express";
 import type { Request, Response } from "express";
 import { GatewayClient, type SupportedChainName } from "@circle-fin/x402-batching/client";
@@ -28,7 +29,14 @@ import { getEurcBalance, withdrawEurc } from "./eurc.js";
 import { startAgentRuntime } from "./runtime.js";
 import { sweepAbandonedMatches } from "./abandon.js";
 import { recordMcpPayment, getMcpRevenueStats } from "./mcpRevenue.js";
+import { recordBrokerMediation } from "./ledger.js";
+import { createTournament, joinTournament, getTournament, listTournaments } from "./tournament.js";
 import type { Address, Temperament } from "@nanostakes/shared";
+import { renderMetrics } from "./metrics.js";
+import { analyzeMatch } from "./coach.js";
+import { sendMessage, getMessages, markRead, createClan, joinClan, leaveClan, listClans, getClan } from "./social.js";
+import { openMarket, placePrediction, getMarket, listOpenMarkets } from "./predictions.js";
+import { startAutoTournaments, stopAutoTournaments } from "./autoTournament.js";
 
 interface PaidRequest extends Request {
   payment?: { verified: boolean; payer: string; amount: string; network: string; transaction?: string };
@@ -303,7 +311,8 @@ app.post("/agents/:id/rename", (req: Request, res: Response) => {
  * (see @nanostakes/contender's challenge-polling loop) decides accept/decline
  * by a temperament-based policy — no human in the loop on either side.
  */
-app.post("/challenges", (req: Request, res: Response) => {
+app.post("/challenges", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
+  logMcpPayment("/challenges", req);
   const { gameId, from, to } = req.body as { gameId?: string; from?: Address; to?: Address };
   if (!gameId || !from || !to) {
     res.status(400).json({ error: "gameId, from, and to are required" });
@@ -335,7 +344,8 @@ app.get("/challenges", (req: Request, res: Response) => {
   });
 });
 
-app.post("/challenges/:id/respond", (req: Request, res: Response) => {
+app.post("/challenges/:id/respond", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
+  logMcpPayment("/challenges/:id/respond", req);
   const { responder, accept } = req.body as { responder?: Address; accept?: boolean };
   if (!responder || typeof accept !== "boolean") {
     res.status(400).json({ error: "responder and accept (boolean) are required" });
@@ -377,7 +387,8 @@ app.post("/match", (req: Request, res: Response) => {
  * enough players are waiting — no caller needs to know who their opponent
  * will be ahead of time.
  */
-app.post("/queue/join", (req: Request, res: Response) => {
+app.post("/queue/join", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
+  logMcpPayment("/queue/join", req);
   const { gameId, player, temperament } = req.body as { gameId: string; player: string; temperament?: Temperament };
   try {
     const result = joinQueue(gameId, player, temperament);
@@ -402,7 +413,8 @@ app.get("/queue/:gameId/status", (req: Request, res: Response) => {
 });
 
 /** Bail out of a game's queue without waiting indefinitely — used when an agent's live game choice picks something nobody else is queuing for right now. */
-app.post("/queue/:gameId/leave", (req: Request, res: Response) => {
+app.post("/queue/:gameId/leave", gateway.require("$0.000001"), (req: PaidRequest, res: Response) => {
+  logMcpPayment("/queue/:gameId/leave", req);
   const { player } = req.body as { player: string };
   leaveQueue(req.params.gameId, player);
   res.json({ ok: true });
@@ -549,7 +561,8 @@ app.get("/mcp/revenue", (_req: Request, res: Response) => {
   res.json(getMcpRevenueStats());
 });
 
-app.post("/match/:id/move", async (req: Request, res: Response) => {
+app.post("/match/:id/move", gateway.require("$0.00001"), async (req: PaidRequest, res: Response) => {
+  logMcpPayment("/match/:id/move", req);
   try {
     const record = getMatch(req.params.id);
     if (record.status !== "ACTIVE") {
@@ -648,6 +661,268 @@ app.get("/events", (req: Request, res: Response) => {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   });
   req.on("close", unsubscribe);
+});
+
+// ---------------------------------------------------------------------------
+// Broker dispute routes (Brinkmanship only)
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns open dispute opportunities for a Broker to mediate.
+ * A dispute opportunity is a Brinkmanship round where both players'
+ * asks conflict (sum > 1.0) and the round has NOT yet resolved.
+ */
+app.get("/matches/:id/dispute-opportunities", (req: Request, res: Response) => {
+  const record = getMatch(req.params.id);
+  if (!record) { res.status(404).json({ error: "unknown match" }); return; }
+  if (record.gameId !== "brinkmanship") {
+    res.json({ disputes: [] }); return;
+  }
+  const state = record.state as any;
+  const disputes: unknown[] = [];
+  for (const round of (state.rounds ?? [])) {
+    if (!round.resolved) {
+      const players = state.players as string[];
+      const [a, b] = players;
+      const askA = round.offers?.[a];
+      const askB = round.offers?.[b];
+      if (askA != null && askB != null && askA + askB > 1.0) {
+        disputes.push({
+          roundIndex: round.index,
+          askA, askB,
+          conflictAmount: (askA + askB - 1.0) * (round.escalated?.[a] || round.escalated?.[b] ? round.cap : round.basePot),
+        });
+      }
+    }
+  }
+  res.json({ disputes });
+});
+
+/**
+ * A Broker agent submits a mediation offer for a conflicted round.
+ * If both players accept (POST /matches/:id/broker-offer/:offerId/respond),
+ * the broker's fee is deducted from the pot and the suggested resolution applied.
+ */
+app.post("/matches/:id/broker-offer", (req: Request, res: Response) => {
+  const record = getMatch(req.params.id);
+  if (!record) { res.status(404).json({ error: "unknown match" }); return; }
+  const { roundIndex, suggestedResolutionA, suggestedResolutionB, brokerAddress, feeUsdc } = req.body as {
+    roundIndex: number;
+    suggestedResolutionA: number;
+    suggestedResolutionB: number;
+    brokerAddress: string;
+    feeUsdc: number;
+  };
+  if (!brokerAddress || feeUsdc == null) {
+    res.status(400).json({ error: "brokerAddress and feeUsdc required" });
+    return;
+  }
+  const offerId = randomUUID();
+  // Store broker offer on the match record
+  (record as any).brokerOffers ??= {};
+  (record as any).brokerOffers[offerId] = {
+    roundIndex, suggestedResolutionA, suggestedResolutionB, brokerAddress, feeUsdc,
+    responses: {},
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  };
+  persistMatch(record);
+  res.json({ offerId, status: "pending" });
+});
+
+app.post("/matches/:id/broker-offer/:offerId/respond", async (req: Request, res: Response) => {
+  const record = getMatch(req.params.id);
+  if (!record) { res.status(404).json({ error: "unknown match" }); return; }
+  const offer = (record as any).brokerOffers?.[req.params.offerId];
+  if (!offer) { res.status(404).json({ error: "unknown broker offer" }); return; }
+  const { player, accept } = req.body as { player: string; accept: boolean };
+  offer.responses[player] = accept;
+  const players = record.state.players;
+  const allResponded = players.every((p: string) => offer.responses[p] !== undefined);
+  const allAccepted = players.every((p: string) => offer.responses[p] === true);
+  if (allResponded && allAccepted) {
+    offer.status = "accepted";
+    // Apply resolution to the round — force overwrite offers to the suggested values
+    const state = record.state as any;
+    const round = state.rounds?.[offer.roundIndex - 1];
+    if (round && !round.resolved) {
+      round.offers[players[0]] = offer.suggestedResolutionA;
+      round.offers[players[1]] = offer.suggestedResolutionB;
+      // Deduct broker fee from pot by reducing effective offers proportionally
+      // (simple model: if broker fee > 0, reduce both suggested resolutions proportionally)
+      if (offer.feeUsdc > 0) {
+        const pot = round.escalated?.[players[0]] || round.escalated?.[players[1]] ? round.cap : round.basePot;
+        const feeFraction = Math.min(offer.feeUsdc / pot, 0.1); // cap broker fee at 10% of pot
+        round.offers[players[0]] = Math.max(0, offer.suggestedResolutionA * (1 - feeFraction));
+        round.offers[players[1]] = Math.max(0, offer.suggestedResolutionB * (1 - feeFraction));
+        // Record broker earnings in ledger
+        recordBrokerMediation(offer.brokerAddress, offer.feeUsdc * pot);
+      }
+    }
+    record.state = state;
+  } else if (allResponded && !allAccepted) {
+    offer.status = "rejected";
+  }
+  persistMatch(record);
+  res.json({ status: offer.status, offer });
+});
+
+// ---------------------------------------------------------------------------
+// Tournament routes
+// ---------------------------------------------------------------------------
+
+app.post("/tournaments", (req: Request, res: Response) => {
+  try {
+    const { name, gameId, format, entryFeeUsdc, prizePoolUsdc, maxPlayers } = req.body as {
+      name?: string;
+      gameId?: string;
+      format?: string;
+      entryFeeUsdc?: number;
+      prizePoolUsdc?: number;
+      maxPlayers?: number;
+    };
+    const tournament = createTournament({
+      name: name ?? "Tournament",
+      gameId: gameId ?? "brinkmanship",
+      format: (format as "round-robin" | "single-elimination") ?? "round-robin",
+      entryFeeUsdc: entryFeeUsdc ?? 1,
+      prizePoolUsdc: prizePoolUsdc ?? 10,
+      maxPlayers: maxPlayers ?? 4,
+    });
+    res.json({ tournament });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.post("/tournaments/:id/join", (req: Request, res: Response) => {
+  try {
+    const { player } = req.body as { player?: Address };
+    if (!player) { res.status(400).json({ error: "player is required" }); return; }
+    const tournament = joinTournament(req.params.id, player);
+    res.json({ tournament });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+app.get("/tournaments/:id", (req: Request, res: Response) => {
+  const t = getTournament(req.params.id);
+  if (!t) { res.status(404).json({ error: "unknown tournament" }); return; }
+  res.json({ tournament: t });
+});
+
+app.get("/tournaments/:id/standings", (req: Request, res: Response) => {
+  const t = getTournament(req.params.id);
+  if (!t) { res.status(404).json({ error: "unknown tournament" }); return; }
+  const ranked = Object.entries(t.standings)
+    .sort(([, a], [, b]) => b.points - a.points)
+    .map(([address, stats], i) => ({ rank: i + 1, address, ...stats }));
+  res.json({ tournamentId: t.id, status: t.status, standings: ranked });
+});
+
+app.get("/tournaments", (_req: Request, res: Response) => {
+  res.json({ tournaments: listTournaments() });
+});
+
+// ─── Metrics ──────────────────────────────────────────────────────────────
+
+app.get("/metrics", (_req: Request, res: Response) => {
+  res.setHeader("Content-Type", "text/plain; version=0.0.4");
+  res.send(renderMetrics());
+});
+
+// ─── Coach ────────────────────────────────────────────────────────────────
+
+app.post("/agents/:id/analyze-match", (req: Request, res: Response) => {
+  const agent = getAgent(req.params.id);
+  if (!agent) { res.status(404).json({ error: "unknown agent" }); return; }
+  const { matchId } = req.body as { matchId?: string };
+  if (!matchId) { res.status(400).json({ error: "matchId required" }); return; }
+  const record = getMatch(matchId);
+  if (!record) { res.status(404).json({ error: "unknown match" }); return; }
+  if (record.gameId !== "brinkmanship") { res.status(400).json({ error: "coach only supports brinkmanship matches" }); return; }
+  const analysis = analyzeMatch(record.state as any, agent.sessionAddress);
+  res.json({ analysis });
+});
+
+// ─── Social ───────────────────────────────────────────────────────────────
+
+app.post("/messages", (req: Request, res: Response) => {
+  try {
+    const { from, to, text } = req.body as { from?: string; to?: string; text?: string };
+    if (!from || !to || !text) { res.status(400).json({ error: "from, to, text required" }); return; }
+    res.json({ message: sendMessage(from, to, text) });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.get("/messages", (req: Request, res: Response) => {
+  const { address, since } = req.query as { address?: string; since?: string };
+  if (!address) { res.status(400).json({ error: "?address= required" }); return; }
+  res.json({ messages: getMessages(address, since) });
+});
+app.post("/messages/:id/read", (req: Request, res: Response) => {
+  const { reader } = req.body as { reader?: string };
+  if (!reader) { res.status(400).json({ error: "reader required" }); return; }
+  markRead(req.params.id, reader);
+  res.json({ ok: true });
+});
+app.post("/clans", (req: Request, res: Response) => {
+  try {
+    const { founder, name, tag, description } = req.body as { founder?: string; name?: string; tag?: string; description?: string };
+    if (!founder || !name || !tag) { res.status(400).json({ error: "founder, name, tag required" }); return; }
+    res.json({ clan: createClan(founder, name, tag, description ?? "") });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.get("/clans", (_req: Request, res: Response) => res.json({ clans: listClans() }));
+app.get("/clans/:id", (req: Request, res: Response) => {
+  const clan = getClan(req.params.id);
+  if (!clan) { res.status(404).json({ error: "unknown clan" }); return; }
+  res.json({ clan });
+});
+app.post("/clans/:id/join", (req: Request, res: Response) => {
+  try {
+    const { member } = req.body as { member?: string };
+    if (!member) { res.status(400).json({ error: "member required" }); return; }
+    res.json({ clan: joinClan(req.params.id, member) });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.post("/clans/:id/leave", (req: Request, res: Response) => {
+  try {
+    const { member } = req.body as { member?: string };
+    if (!member) { res.status(400).json({ error: "member required" }); return; }
+    leaveClan(req.params.id, member);
+    res.json({ ok: true });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// ─── Prediction Markets ───────────────────────────────────────────────────
+
+app.post("/predictions/markets", (req: Request, res: Response) => {
+  try {
+    const { matchId } = req.body as { matchId?: string };
+    if (!matchId) { res.status(400).json({ error: "matchId required" }); return; }
+    res.json({ market: openMarket(matchId) });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+app.get("/predictions/markets", (_req: Request, res: Response) => res.json({ markets: listOpenMarkets() }));
+app.get("/predictions/markets/:matchId", (req: Request, res: Response) => {
+  const market = getMarket(req.params.matchId);
+  if (!market) { res.status(404).json({ error: "no market for this match" }); return; }
+  res.json({ market });
+});
+app.post("/predictions/markets/:matchId/predict", (req: Request, res: Response) => {
+  try {
+    const { predictor, predictedWinner, stakeUsdc } = req.body as { predictor?: string; predictedWinner?: string; stakeUsdc?: number };
+    if (!predictor || !predictedWinner || !stakeUsdc) { res.status(400).json({ error: "predictor, predictedWinner, stakeUsdc required" }); return; }
+    res.json({ prediction: placePrediction(req.params.matchId, predictor, predictedWinner, stakeUsdc) });
+  } catch (err) { res.status(400).json({ error: (err as Error).message }); }
+});
+
+// ─── Auto-tournaments ─────────────────────────────────────────────────────
+
+app.post("/admin/auto-tournaments/start", (_req: Request, res: Response) => {
+  startAutoTournaments();
+  res.json({ ok: true, message: "Hourly exhibition scheduler started" });
+});
+app.post("/admin/auto-tournaments/stop", (_req: Request, res: Response) => {
+  stopAutoTournaments();
+  res.json({ ok: true, message: "Exhibition scheduler stopped" });
 });
 
 /**

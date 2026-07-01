@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Address, EngineEvent, GameEngine, GameManifest, MatchResult } from "@nanostakes/shared";
+import type { Address, BrokerSeat, EngineEvent, GameEngine, GameManifest, MatchResult } from "@nanostakes/shared";
 
 /** One-shot sealed-pitch game judged by a neutral third party, not a payout formula — proves the Bracket plugin pattern works for non-deterministic settlement too. */
 export const ENTRY_STAKE_EACH = 2.5;
@@ -35,6 +35,10 @@ export interface PromptWarState {
   phase: "PITCH" | "JUDGING" | "DONE";
   winner?: Address;
   judgeRationale?: string;
+  /** The asset used for stakes and payouts. Defaults to "USDC" when absent. */
+  stakeAsset?: "USDC" | "EURC";
+  /** Optional broker seat. */
+  broker?: BrokerSeat;
 }
 
 const manifest: GameManifest = {
@@ -44,9 +48,10 @@ const manifest: GameManifest = {
   maxPlayers: 2,
 };
 
-function initState(players: Address[]): PromptWarState {
+function initState(players: Address[], opts?: Record<string, unknown>): PromptWarState {
   if (players.length !== 2) throw new Error("Prompt War requires exactly 2 players");
   const [a, b] = players;
+  const stakeAsset = (opts?.stakeAsset as "USDC" | "EURC") ?? "USDC";
   return {
     matchId: randomUUID(),
     players,
@@ -56,6 +61,8 @@ function initState(players: Address[]): PromptWarState {
     pitches: { [a]: undefined, [b]: undefined },
     acted: { [a]: false, [b]: false },
     phase: "PITCH",
+    stakeAsset,
+    broker: opts?.broker as BrokerSeat | undefined,
   };
 }
 

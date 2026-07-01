@@ -1,0 +1,19 @@
+{
+  "name": "@nanostakes/agent-sdk",
+  "version": "0.1.0",
+  "description": "SDK for building autonomous agents on Nanostakes Arena",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "import": "./dist/index.js", "types": "./dist/index.d.ts" } },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@circle-fin/x402-batching": "^3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

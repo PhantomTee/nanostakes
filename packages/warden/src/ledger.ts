@@ -1,6 +1,7 @@
 import type { Address, Temperament } from "@nanostakes/shared";
 import { db } from "./db.js";
 import type { RoundBehaviorStats } from "./behaviorStats.js";
+import { updateElo, currentSeason, BASE_ELO } from "./elo.js";
 
 export interface AgentRecord {
   address: Address;
@@ -19,6 +20,10 @@ export interface AgentRecord {
   concessionSum: number;
   escalationCount: number;
   fairShareGapSum: number;
+  eloRating?: number;
+  eloSeason?: number;
+  seasonWins?: number;
+  seasonLosses?: number;
 }
 
 export interface BehaviorStats {
@@ -49,11 +54,13 @@ const selectAgent = db.prepare("SELECT * FROM ledger_agents WHERE address = ?");
 const upsertAgent = db.prepare(`
   INSERT INTO ledger_agents (
     address, temperament, matchesPlayed, wins, losses, ties, totalStaked, totalReturned, netPnl,
-    behaviorRounds, claimSum, concessionSum, escalationCount, fairShareGapSum
+    behaviorRounds, claimSum, concessionSum, escalationCount, fairShareGapSum,
+    elo_rating, elo_season, season_wins, season_losses
   )
   VALUES (
     @address, @temperament, @matchesPlayed, @wins, @losses, @ties, @totalStaked, @totalReturned, @netPnl,
-    @behaviorRounds, @claimSum, @concessionSum, @escalationCount, @fairShareGapSum
+    @behaviorRounds, @claimSum, @concessionSum, @escalationCount, @fairShareGapSum,
+    @elo_rating, @elo_season, @season_wins, @season_losses
   )
   ON CONFLICT(address) DO UPDATE SET
     temperament = excluded.temperament,
@@ -68,13 +75,40 @@ const upsertAgent = db.prepare(`
     claimSum = excluded.claimSum,
     concessionSum = excluded.concessionSum,
     escalationCount = excluded.escalationCount,
-    fairShareGapSum = excluded.fairShareGapSum
+    fairShareGapSum = excluded.fairShareGapSum,
+    elo_rating = excluded.elo_rating,
+    elo_season = excluded.elo_season,
+    season_wins = excluded.season_wins,
+    season_losses = excluded.season_losses
 `);
 const selectAllAgents = db.prepare("SELECT * FROM ledger_agents");
 
+function rowToRecord(row: any): AgentRecord {
+  return {
+    address: row.address,
+    temperament: row.temperament ?? undefined,
+    matchesPlayed: row.matchesPlayed ?? 0,
+    wins: row.wins ?? 0,
+    losses: row.losses ?? 0,
+    ties: row.ties ?? 0,
+    totalStaked: row.totalStaked ?? 0,
+    totalReturned: row.totalReturned ?? 0,
+    netPnl: row.netPnl ?? 0,
+    behaviorRounds: row.behaviorRounds ?? 0,
+    claimSum: row.claimSum ?? 0,
+    concessionSum: row.concessionSum ?? 0,
+    escalationCount: row.escalationCount ?? 0,
+    fairShareGapSum: row.fairShareGapSum ?? 0,
+    eloRating: row.elo_rating ?? BASE_ELO,
+    eloSeason: row.elo_season ?? 0,
+    seasonWins: row.season_wins ?? 0,
+    seasonLosses: row.season_losses ?? 0,
+  };
+}
+
 function getOrCreate(address: Address): AgentRecord {
-  const row = selectAgent.get(address) as AgentRecord | undefined;
-  if (row) return row;
+  const row = selectAgent.get(address) as any | undefined;
+  if (row) return rowToRecord(row);
   return {
     address,
     matchesPlayed: 0,
@@ -89,6 +123,10 @@ function getOrCreate(address: Address): AgentRecord {
     concessionSum: 0,
     escalationCount: 0,
     fairShareGapSum: 0,
+    eloRating: BASE_ELO,
+    eloSeason: 0,
+    seasonWins: 0,
+    seasonLosses: 0,
   };
 }
 
@@ -138,10 +176,38 @@ export function recordMatch(params: {
         rec.fairShareGapSum += bs.fairShareGapSum;
       }
 
-      upsertAgent.run({ ...rec, temperament: rec.temperament ?? null });
+      upsertAgent.run({
+        ...rec,
+        temperament: rec.temperament ?? null,
+        elo_rating: rec.eloRating ?? BASE_ELO,
+        elo_season: rec.eloSeason ?? 0,
+        season_wins: rec.seasonWins ?? 0,
+        season_losses: rec.seasonLosses ?? 0,
+      });
     }
   });
   tx();
+
+  // Elo update for 2-player matches (runs after the main transaction)
+  if (players.length === 2) {
+    const [p1, p2] = players;
+    const r1 = getOrCreate(p1);
+    const r2 = getOrCreate(p2);
+    const winner = (pnl[p1] ?? 0) > (pnl[p2] ?? 0) ? p1 : ((pnl[p2] ?? 0) > (pnl[p1] ?? 0) ? p2 : null);
+    if (winner) {
+      const loser = winner === p1 ? p2 : p1;
+      const winnerRec = winner === p1 ? r1 : r2;
+      const loserRec = winner === p1 ? r2 : r1;
+      const [newWinnerElo, newLoserElo] = updateElo(winnerRec.eloRating ?? BASE_ELO, loserRec.eloRating ?? BASE_ELO);
+      const season = currentSeason();
+      // Update winner
+      const winnerUpdate = db.prepare(`UPDATE ledger_agents SET elo_rating=?, elo_season=?, season_wins=season_wins+1 WHERE address=?`);
+      winnerUpdate.run(newWinnerElo, season, winner);
+      // Update loser
+      const loserUpdate = db.prepare(`UPDATE ledger_agents SET elo_rating=?, elo_season=?, season_losses=season_losses+1 WHERE address=?`);
+      loserUpdate.run(newLoserElo, season, loser);
+    }
+  }
 }
 
 export type Standing = "UNRANKED" | "CONTENDER" | "STEADY" | "ELITE";
@@ -162,13 +228,23 @@ export function getAgentRecord(address: Address): AgentRecord & { standing: Stan
 }
 
 export function getLeaderboard(): Array<AgentRecord & { standing: Standing; behavior: BehaviorStats }> {
-  const rows = selectAllAgents.all() as AgentRecord[];
+  const rows = selectAllAgents.all() as any[];
   return rows
+    .map((row) => rowToRecord(row))
     .map((rec) => ({ ...rec, standing: standingOf(rec), behavior: behaviorStatsOf(rec) }))
     .sort((a, b) => b.netPnl - a.netPnl);
 }
 
 /** Aggregate stats grouped by temperament, across all agents that have played as that temperament. */
+/**
+ * Stub: records that a broker agent earned a mediation fee for resolving a
+ * conflicted Brinkmanship round. Full ledger integration (persistence,
+ * leaderboard column) is deferred — this stub lets the broker-offer route
+ * compile and run without touching the SQLite schema today.
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function recordBrokerMediation(_brokerAddress: string, _feeUsdc: number): void {}
+
 export function getTemperamentStats(): Record<string, { agents: number; matches: number; netPnl: number; avgPnlPerMatch: number }> {
   const leaderboard = getLeaderboard();
   const groups: Record<string, { agents: number; matches: number; netPnl: number }> = {};
@@ -184,4 +260,9 @@ export function getTemperamentStats(): Record<string, { agents: number; matches:
     out[k] = { ...v, avgPnlPerMatch: v.matches === 0 ? 0 : v.netPnl / v.matches };
   }
   return out;
+}
+
+export function getSeasonLeaderboard(): AgentRecord[] {
+  const rows = db.prepare("SELECT * FROM ledger_agents WHERE matchesPlayed > 0 ORDER BY elo_rating DESC").all() as any[];
+  return rows.map(rowToRecord);
 }

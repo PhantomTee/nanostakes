@@ -3,7 +3,17 @@ import type { Hex } from "viem";
 
 export interface SessionWallet {
   address: string;
-  privateKey: Hex;
+  /**
+   * For provider="local": raw hex private key (0x...) suitable for use with
+   * viem's privateKeyToAccount / GatewayClient directly.
+   *
+   * For provider="circle": a sentinel string of the form "circle:<walletId>"
+   * — this is NOT a valid private key. Downstream payment code (gateway.ts
+   * Wave 2 integration) must inspect provider before consuming this field:
+   *   - provider === "local"  → use privateKey directly with GatewayClient
+   *   - provider === "circle" → extract walletId and route via circleSignAndSend()
+   */
+  privateKey: Hex | `circle:${string}`;
   provider: "circle" | "local";
 }
 
@@ -36,5 +46,17 @@ export async function provisionSessionWallet(): Promise<SessionWallet> {
 }
 
 async function provisionCircleDeveloperWallet(): Promise<SessionWallet> {
-  throw new Error("Circle Developer-Controlled Wallets integration is not wired up yet");
+  const { provisionCircleWallet } = await import("./circleSign.js");
+  const wallet = await provisionCircleWallet();
+  return {
+    address: wallet.address,
+    /**
+     * Not a real private key — a sentinel so downstream code can detect that
+     * this wallet is Circle-custodied and route signing through circleSignAndSend()
+     * rather than through a local viem account / GatewayClient (Wave 2 wiring).
+     * Format: "circle:<walletId>"
+     */
+    privateKey: `circle:${wallet.walletId}` as `circle:${string}`,
+    provider: "circle",
+  };
 }

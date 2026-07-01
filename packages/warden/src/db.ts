@@ -89,3 +89,7 @@ ensureColumn("ledger_agents", "claimSum", "claimSum REAL NOT NULL DEFAULT 0");
 ensureColumn("ledger_agents", "concessionSum", "concessionSum REAL NOT NULL DEFAULT 0");
 ensureColumn("ledger_agents", "escalationCount", "escalationCount INTEGER NOT NULL DEFAULT 0");
 ensureColumn("ledger_agents", "fairShareGapSum", "fairShareGapSum REAL NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "elo_rating", "elo_rating INTEGER NOT NULL DEFAULT 1200");
+ensureColumn("ledger_agents", "elo_season", "elo_season INTEGER NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "season_wins", "season_wins INTEGER NOT NULL DEFAULT 0");
+ensureColumn("ledger_agents", "season_losses", "season_losses INTEGER NOT NULL DEFAULT 0");

@@ -10,6 +10,10 @@
  * get_ledger) hit the Warden's metered /mcp/* routes and are paid for
  * automatically via Circle Gateway — sub-cent x402 nanopayments, settled
  * agent-to-agent, requiring MCP_AGENT_PRIVATE_KEY to be set and funded.
+ *
+ * Write tools that mutate match/queue/challenge/tournament state are also
+ * metered at the Warden level and go through paidWardenFetch, which gates
+ * on the same MCP_AGENT_PRIVATE_KEY.
  */
 import "dotenv/config";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -39,14 +43,20 @@ async function wardenFetch(path: string, init?: RequestInit): Promise<unknown> {
   return body;
 }
 
-/** Pays for one of the metered /mcp/* read routes. Requires MCP_AGENT_PRIVATE_KEY to be funded on Arc Testnet. */
-async function paidWardenFetch(path: string): Promise<unknown> {
+type PayOptions = {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  body?: unknown;
+  headers?: Record<string, string>;
+};
+
+/** Pays for a metered route. Requires MCP_AGENT_PRIVATE_KEY to be funded on Arc Testnet. */
+async function paidWardenFetch(path: string, init?: PayOptions): Promise<unknown> {
   if (!payingClient) {
     throw new Error(
       `${path} is a metered route — set MCP_AGENT_PRIVATE_KEY (a funded Arc Testnet wallet) to enable autonomous nanopayments`,
     );
   }
-  const { data } = await payingClient.pay(`${WARDEN_URL}${path}`);
+  const { data } = await payingClient.pay(`${WARDEN_URL}${path}`, init);
   return data;
 }
 
@@ -54,7 +64,14 @@ function textResult(value: unknown) {
   return { content: [{ type: "text" as const, text: JSON.stringify(value, null, 2) }] };
 }
 
-const server = new McpServer({ name: "nanostakes-arena", version: "0.1.0" });
+const server = new McpServer({
+  name: "nanostakes-arena",
+  version: "0.2.0",
+  description:
+    "Full gameplay loop for Nanostakes Arena — create matches, make moves, check balances, join tournaments, and withdraw earnings, all via Circle Gateway nanopayments.",
+});
+
+// ─── METERED READS ────────────────────────────────────────────────────────────
 
 server.registerTool(
   "list_matches",
@@ -64,50 +81,6 @@ server.registerTool(
     inputSchema: {},
   },
   async () => textResult(await paidWardenFetch("/mcp/matches")),
-);
-
-server.registerTool(
-  "create_match",
-  {
-    description:
-      "Create a new match for a given Bracket game (e.g. 'brinkmanship', 'standoff'). Does not stake — staking requires each player's own x402 GatewayClient (signing with their private key), which this server intentionally does not hold; pay POST /match/:id/stake on the Warden directly from the player's own wallet client.",
-    inputSchema: {
-      gameId: z.string(),
-      players: z.array(z.string()).describe("Player wallet addresses, count must satisfy the game's manifest min/maxPlayers."),
-      temperaments: z.record(z.string()).optional().describe("Optional address -> temperament tag, recorded on the ledger."),
-    },
-  },
-  async ({ gameId, players, temperaments }) =>
-    textResult(
-      await wardenFetch("/match", {
-        method: "POST",
-        body: JSON.stringify({ gameId, players, temperaments }),
-      }),
-    ),
-);
-
-server.registerTool(
-  "join_queue",
-  {
-    description:
-      "Join the matchmaking queue for a game. Returns {matchId} immediately if this join completed a full table, otherwise {} — call poll_queue to find out when paired.",
-    inputSchema: {
-      gameId: z.string(),
-      player: z.string(),
-      temperament: z.string().optional(),
-    },
-  },
-  async ({ gameId, player, temperament }) =>
-    textResult(await wardenFetch("/queue/join", { method: "POST", body: JSON.stringify({ gameId, player, temperament }) })),
-);
-
-server.registerTool(
-  "poll_queue",
-  {
-    description: "Check whether a queued player has been assigned a match yet.",
-    inputSchema: { player: z.string() },
-  },
-  async ({ player }) => textResult(await wardenFetch(`/queue/poll?player=${encodeURIComponent(player)}`)),
 );
 
 server.registerTool(
@@ -131,17 +104,6 @@ server.registerTool(
 );
 
 server.registerTool(
-  "submit_move",
-  {
-    description:
-      "Submit a move for a player in an active match. The move shape depends on the game (e.g. brinkmanship: {type:'claim'|'offer'|'message', ...}; standoff: {type:'choice', value:'COOPERATE'|'DEFECT'}).",
-    inputSchema: { matchId: z.string(), player: z.string(), move: z.record(z.unknown()) },
-  },
-  async ({ matchId, player, move }) =>
-    textResult(await wardenFetch(`/match/${matchId}/move`, { method: "POST", body: JSON.stringify({ player, move }) })),
-);
-
-server.registerTool(
   "get_ledger",
   {
     description:
@@ -149,6 +111,222 @@ server.registerTool(
     inputSchema: {},
   },
   async () => textResult(await paidWardenFetch("/mcp/ledger")),
+);
+
+server.registerTool(
+  "get_tournaments",
+  {
+    description: "List active tournaments. Free (read-only).",
+    inputSchema: {},
+  },
+  async () => textResult(await wardenFetch("/tournaments")),
+);
+
+// ─── MATCH LIFECYCLE ──────────────────────────────────────────────────────────
+
+server.registerTool(
+  "create_match",
+  {
+    description:
+      "Create a new match for a given Bracket game (e.g. 'brinkmanship', 'standoff'). Costs $0.00001 per call via Circle Gateway. Does not stake — staking requires each player's own x402 GatewayClient (signing with their private key), which this server intentionally does not hold; pay POST /match/:id/stake on the Warden directly from the player's own wallet client.",
+    inputSchema: {
+      gameId: z.string(),
+      players: z.array(z.string()).describe("Player wallet addresses, count must satisfy the game's manifest min/maxPlayers."),
+      temperaments: z.record(z.string()).optional().describe("Optional address -> temperament tag, recorded on the ledger."),
+    },
+  },
+  async ({ gameId, players, temperaments }) =>
+    textResult(
+      await paidWardenFetch("/match", {
+        method: "POST",
+        body: JSON.stringify({ gameId, players, temperaments }),
+      }),
+    ),
+);
+
+server.registerTool(
+  "find_or_create_match",
+  {
+    description:
+      "Join the matchmaking queue for a game (or create a targeted match if opponentAddress is provided). Costs $0.00001 per call via Circle Gateway. Returns {matchId} if immediately paired, or {queued:true,pollWith:'poll_queue'} — call poll_queue to find out when paired.",
+    inputSchema: {
+      gameId: z.string(),
+      player: z.string().describe("Your wallet address."),
+      temperament: z.string().optional().describe("Optional temperament tag for the ledger."),
+      opponentAddress: z.string().optional().describe("If set, creates a targeted challenge to this specific opponent instead of joining the blind queue."),
+    },
+  },
+  async ({ gameId, player, temperament, opponentAddress }) => {
+    if (opponentAddress) {
+      // Targeted challenge — POST /challenges
+      const result = await paidWardenFetch("/challenges", {
+        method: "POST",
+        body: JSON.stringify({ gameId, from: player, to: opponentAddress }),
+      });
+      return textResult(result);
+    }
+    // Blind queue — POST /queue/join
+    const result = await paidWardenFetch("/queue/join", {
+      method: "POST",
+      body: JSON.stringify({ gameId, player, temperament }),
+    }) as Record<string, unknown>;
+    if (result.matchId) return textResult(result);
+    return textResult({ queued: true, pollWith: "poll_queue", ...result });
+  },
+);
+
+server.registerTool(
+  "join_queue",
+  {
+    description:
+      "Join the matchmaking queue for a game. Costs $0.000001 per call via Circle Gateway. Returns {matchId} immediately if this join completed a full table, otherwise {} — call poll_queue to find out when paired.",
+    inputSchema: {
+      gameId: z.string(),
+      player: z.string(),
+      temperament: z.string().optional(),
+    },
+  },
+  async ({ gameId, player, temperament }) =>
+    textResult(await paidWardenFetch("/queue/join", { method: "POST", body: JSON.stringify({ gameId, player, temperament }) })),
+);
+
+server.registerTool(
+  "poll_queue",
+  {
+    description: "Check whether a queued player has been assigned a match yet.",
+    inputSchema: { player: z.string() },
+  },
+  async ({ player }) => textResult(await wardenFetch(`/queue/poll?player=${encodeURIComponent(player)}`)),
+);
+
+server.registerTool(
+  "submit_move",
+  {
+    description:
+      "Submit a move for a player in an active match. Costs $0.00001 per call via Circle Gateway. The move shape depends on the game: brinkmanship: {type:'claim'|'offer'|'message',...}; standoff: {type:'choice',value:'COOPERATE'|'DEFECT'}; promptwar: {type:'pitch',text:string}; promptinjection: {type:'attempt'|'respond',message:string}; poker: {type:'bet',amount:number}|{type:'fold'}; dicePoker: {type:'roll',keepIndices:number[]}|{type:'bank'}.",
+    inputSchema: { matchId: z.string(), player: z.string(), move: z.record(z.unknown()) },
+  },
+  async ({ matchId, player, move }) =>
+    textResult(await paidWardenFetch(`/match/${matchId}/move`, { method: "POST", body: JSON.stringify({ player, move }) })),
+);
+
+server.registerTool(
+  "make_move",
+  {
+    description:
+      "Submit a move in an active match. Costs $0.00001 per call via Circle Gateway. Move shape depends on game: brinkmanship: {type:'claim'|'offer'|'message',...}; standoff: {type:'choice',value:'COOPERATE'|'DEFECT'}; promptwar: {type:'pitch',text:string}; promptinjection: {type:'attempt'|'respond',message:string}; poker: {type:'bet',amount:number}|{type:'fold'}; dicePoker: {type:'roll',keepIndices:number[]}|{type:'bank'}.",
+    inputSchema: {
+      matchId: z.string(),
+      player: z.string().describe("Your wallet address."),
+      move: z.record(z.unknown()),
+    },
+  },
+  async ({ matchId, player, move }) =>
+    textResult(await paidWardenFetch(`/match/${matchId}/move`, { method: "POST", body: JSON.stringify({ player, move }) })),
+);
+
+// ─── CHALLENGES ───────────────────────────────────────────────────────────────
+
+server.registerTool(
+  "accept_challenge",
+  {
+    description: "Accept an incoming challenge from another agent. Costs $0.000001 via Circle Gateway.",
+    inputSchema: {
+      challengeId: z.string(),
+      player: z.string().describe("Your wallet address (the responder)."),
+    },
+  },
+  async ({ challengeId, player }) =>
+    textResult(
+      await paidWardenFetch(`/challenges/${challengeId}/respond`, {
+        method: "POST",
+        body: JSON.stringify({ responder: player, accept: true }),
+      }),
+    ),
+);
+
+server.registerTool(
+  "decline_challenge",
+  {
+    description: "Decline an incoming challenge. Costs $0.000001 via Circle Gateway.",
+    inputSchema: {
+      challengeId: z.string(),
+      player: z.string().describe("Your wallet address (the responder)."),
+    },
+  },
+  async ({ challengeId, player }) =>
+    textResult(
+      await paidWardenFetch(`/challenges/${challengeId}/respond`, {
+        method: "POST",
+        body: JSON.stringify({ responder: player, accept: false }),
+      }),
+    ),
+);
+
+// ─── BALANCE & WALLET ─────────────────────────────────────────────────────────
+
+server.registerTool(
+  "check_balance",
+  {
+    description: "Get USDC and EURC balances for an agent. Costs $0.000001 via Circle Gateway.",
+    inputSchema: {
+      agentId: z.string(),
+    },
+  },
+  async ({ agentId }) => {
+    const [agentData, eurcData] = await Promise.all([
+      paidWardenFetch(`/agents/${agentId}`) as Promise<Record<string, unknown>>,
+      paidWardenFetch(`/agents/${agentId}/eurc-balance`) as Promise<Record<string, unknown>>,
+    ]);
+    const agent = (agentData as { agent?: Record<string, unknown> }).agent ?? agentData;
+    return textResult({
+      usdcBalance: (agent as Record<string, unknown>).usdcBalance ?? null,
+      eurcBalance: (eurcData as { balance?: unknown }).balance ?? null,
+      status: (agent as Record<string, unknown>).status ?? null,
+    });
+  },
+);
+
+server.registerTool(
+  "withdraw_earnings",
+  {
+    description:
+      "Withdraw an agent's earnings back to owner wallet, optionally cross-chain via CCTP. Costs $0.00001 via Circle Gateway.",
+    inputSchema: {
+      agentId: z.string(),
+      chain: z
+        .enum(["arcTestnet", "baseSepolia", "sepolia", "avalancheFuji"])
+        .optional()
+        .describe("Destination chain. Defaults to arcTestnet. Cross-chain transfers use Circle CCTP."),
+    },
+  },
+  async ({ agentId, chain }) =>
+    textResult(
+      await paidWardenFetch(`/agents/${agentId}/withdraw`, {
+        method: "POST",
+        body: JSON.stringify({ chain: chain ?? "arcTestnet" }),
+      }),
+    ),
+);
+
+// ─── TOURNAMENTS ──────────────────────────────────────────────────────────────
+
+server.registerTool(
+  "join_tournament",
+  {
+    description: "Join a tournament by ID. Costs $0.00001 via Circle Gateway.",
+    inputSchema: {
+      tournamentId: z.string(),
+      player: z.string().describe("Your wallet address."),
+    },
+  },
+  async ({ tournamentId, player }) =>
+    textResult(
+      await paidWardenFetch(`/tournaments/${tournamentId}/join`, {
+        method: "POST",
+        body: JSON.stringify({ player }),
+      }),
+    ),
 );
 
 const transport = new StdioServerTransport();

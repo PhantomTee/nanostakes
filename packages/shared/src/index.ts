@@ -19,7 +19,7 @@ export const TEMPERAMENT_PRIMERS: Record<Temperament, string> = {
 };
 
 /** Round-1..N phases of a single Brinkmanship round. */
-export type RoundPhase = "NEGOTIATE" | "OFFER" | "REVEAL" | "DONE";
+export type RoundPhase = "NEGOTIATE" | "OFFER" | "BRIBE" | "REVEAL" | "DONE";
 
 export interface ChatMessage {
   from: Address;
@@ -31,6 +31,9 @@ export interface ChatMessage {
 export interface ClaimMove {
   type: "claim";
   value: number; // claimed valuation, 0..1 fraction of round pot
+  /** keccak256(value, nonce) — optional; if present, engine validates the commitment matches (value, nonce) before accepting the move. */
+  commitment?: string;
+  nonce?: string;
 }
 
 export interface MessageMove {
@@ -55,7 +58,14 @@ export interface OfferMove {
   nonce?: string;
 }
 
-export type Move = ClaimMove | MessageMove | OfferMove;
+export interface BribeMove {
+  type: "bribe";
+  targetPlayer: Address;
+  amount: number; // USDC amount to transfer to opponent; must be > 0
+  message: string; // LLM-generated explanation / persuasion text
+}
+
+export type Move = ClaimMove | MessageMove | OfferMove | BribeMove;
 
 export interface RoundState {
   index: number; // 1-based
@@ -72,6 +82,12 @@ export interface RoundState {
   offerCommitments: Record<Address, string>;
   /** Revealed only once the round resolves; combined with `offers`/`escalated`, lets anyone independently re-derive and check the commitment above. */
   offerNonces: Record<Address, string>;
+  /** Optional commit-reveal for claim moves — mirrors offerCommitments pattern. Absent on rounds dealt before this feature shipped. */
+  claimCommitments?: Record<Address, string>;
+  /** Revealed alongside the claim; lets anyone verify the claim value was fixed before the offer phase. */
+  claimNonces?: Record<Address, string>;
+  /** Bribe offers submitted during the BRIBE phase. Key is the bribing player's address. Absent on rounds from before the BRIBE phase was added. */
+  bribeOffers?: Record<Address, { amount: number; message: string; accepted?: boolean }>;
 }
 
 export interface MatchState {
@@ -83,6 +99,10 @@ export interface MatchState {
   currentRoundIndex: number; // 0-based into rounds[]
   phase: RoundPhase;
   acted: Record<Address, boolean>; // who has acted in the current phase/round
+  /** The asset used for stakes and payouts. Defaults to "USDC" when absent (all existing matches remain valid). */
+  stakeAsset?: "USDC" | "EURC";
+  /** Optional broker seat — a third-party intermediary that takes a spread on top of the game's own rake. */
+  broker?: BrokerSeat;
 }
 
 export interface MatchResult {
@@ -161,4 +181,14 @@ export function computeOfferCommitment(ask: number, escalate: boolean, nonce: st
   return keccak256(
     encodePacked(["uint256", "bool", "bytes32"], [askScaled, escalate, nonce as `0x${string}`]),
   );
+}
+
+/**
+ * keccak256 commitment over a sealed Brinkmanship claim, parallel to
+ * computeOfferCommitment. Lets a player commit to their valuation claim
+ * before the offer phase and prove it was fixed in advance at reveal time.
+ */
+export function computeClaimCommitment(value: number, nonce: string): string {
+  const valueScaled = BigInt(Math.round(value * COMMITMENT_SCALE));
+  return keccak256(encodePacked(["uint256", "bytes32"], [valueScaled, nonce as `0x${string}`]));
 }

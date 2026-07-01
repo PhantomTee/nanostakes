@@ -196,6 +196,10 @@ async function playMatch(
       return playPromptWarMatch(opts, agent, matchId, me);
     case "promptinjection":
       return playPromptInjectionMatch(opts, agent, matchId, me);
+    case "poker":
+      return playPokerMatch(opts, agent, matchId, me);
+    case "dicepoker":
+      return playDicePokerMatch(opts, agent, matchId, me);
     default:
       return playBrinkmanshipMatch(opts, agent, matchId, me, preStakeState);
   }
@@ -398,6 +402,94 @@ async function playPromptInjectionMatch(
     } else {
       await sleep(POLL_INTERVAL_MS);
     }
+  }
+}
+
+async function playPokerMatch(
+  opts: DriveAgentOptions,
+  agent: TemperamentAgent,
+  matchId: string,
+  me: string,
+): Promise<void> {
+  const { wardenUrl, onEvent } = opts;
+  const log = onEvent ?? (() => {});
+
+  while (true) {
+    // Get current state (player-scoped, shows your hole cards)
+    const stateRes = await fetch(`${wardenUrl}/match/${matchId}/state?as=${me}`);
+    if (!stateRes.ok) throw new Error(`state fetch failed: ${stateRes.status}`);
+    const { state } = await stateRes.json() as { state: any };
+
+    if (state.phase === "DONE" || state.phase === "SHOWDOWN") break;
+    if (state.folded?.[me]) break; // already folded
+
+    // Check if it's our turn
+    const currentPhase = state.phase;
+    if (!state.acted || state.acted[me]) {
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+
+    const myHoleCards = state.holeCards?.[me] ?? ["??", "??"];
+    const move = await agent.decidePokerMove({
+      phase: currentPhase,
+      myHoleCards,
+      communityCards: state.communityCards ?? [],
+      pot: state.pot ?? 0,
+      myBet: state.bets?.[me] ?? 0,
+      currentHighBet: Math.max(...Object.values(state.bets ?? {}).map(Number), 0),
+      stackRemaining: state.entryStakeEach ?? 3,
+    });
+
+    log(`${agent.name} poker move: ${JSON.stringify(move)}`);
+    await fetch(`${wardenUrl}/match/${matchId}/move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ player: me, move }),
+    });
+
+    if (state.phase === "DONE") break;
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+
+async function playDicePokerMatch(
+  opts: DriveAgentOptions,
+  agent: TemperamentAgent,
+  matchId: string,
+  me: string,
+): Promise<void> {
+  const { wardenUrl, onEvent } = opts;
+  const log = onEvent ?? (() => {});
+
+  while (true) {
+    const stateRes = await fetch(`${wardenUrl}/match/${matchId}/state?as=${me}`);
+    if (!stateRes.ok) throw new Error(`state fetch failed: ${stateRes.status}`);
+    const { state } = await stateRes.json() as { state: any };
+
+    if (state.phase === "DONE") break;
+    if (state.currentPlayer !== me) {
+      await sleep(POLL_INTERVAL_MS);
+      continue;
+    }
+
+    const move = await agent.decideDicePokerMove({
+      currentRoll: state.currentRoll ?? [],
+      keptDice: state.keptDice ?? [],
+      turnScore: state.turnScore ?? 0,
+      totalScore: state.scores?.[me] ?? 0,
+      opponentScore: Math.max(...Object.values(state.scores ?? {}).filter((_: unknown, i: number) => state.players[i] !== me).map(Number), 0),
+      diceAvailable: state.diceAvailable ?? 6,
+    });
+
+    log(`${agent.name} dice poker: ${JSON.stringify(move)}`);
+    await fetch(`${wardenUrl}/match/${matchId}/move`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ player: me, move }),
+    });
+
+    await sleep(POLL_INTERVAL_MS);
   }
 }
 

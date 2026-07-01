@@ -8,6 +8,7 @@ import { wardenGatewayClient } from "./gateway.js";
 import { recordMatch } from "./ledger.js";
 import { computeBrinkmanshipRoundStats } from "./behaviorStats.js";
 import { recordOpponentMemory } from "./memory.js";
+import { transferEurc } from "./eurc.js";
 
 /**
  * Circle Gateway settles x402 payments in batches, so funds from `/stake`
@@ -60,11 +61,21 @@ export async function settleMatch(record: MatchRecord): Promise<Record<Address, 
   const txs: Record<Address, string> = { ...(record.payoutTxs ?? {}) };
   for (const { player, amount } of amounts) {
     if (amount <= 0 || txs[player]) continue;
-    const withdrawal = await wardenGatewayClient.withdraw(amount.toFixed(6), {
-      chain: "arcTestnet",
-      recipient: player as Hex,
-    });
-    txs[player] = withdrawal.mintTxHash;
+    if ((record.state as any).stakeAsset === "EURC") {
+      const txHash = await transferEurc(
+        process.env.WARDEN_PRIVATE_KEY as Hex,
+        player as Hex,
+        amount,
+      );
+      txs[player] = txHash;
+    } else {
+      // existing USDC path — keep unchanged
+      const withdrawal = await wardenGatewayClient.withdraw(amount.toFixed(6), {
+        chain: "arcTestnet",
+        recipient: player as Hex,
+      });
+      txs[player] = withdrawal.mintTxHash;
+    }
   }
 
   record.status = "SETTLED";

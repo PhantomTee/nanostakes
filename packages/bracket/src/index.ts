@@ -13,12 +13,22 @@ export type { PromptWarState, PromptWarMove } from "./games/promptWar.js";
 export { promptInjection, ENTRY_STAKE_EACH as PROMPT_INJECTION_ENTRY_STAKE_EACH } from "./games/promptInjection.js";
 export type { PromptInjectionState, PromptInjectionMove } from "./games/promptInjection.js";
 
+import { poker } from "./games/poker.js";
+export { poker, ENTRY_STAKE_EACH as POKER_ENTRY_STAKE_EACH } from "./games/poker.js";
+export type { PokerState, PokerMove } from "./games/poker.js";
+
+import { dicePoker } from "./games/dicePoker.js";
+export { dicePoker, ENTRY_STAKE_EACH as DICE_POKER_ENTRY_STAKE_EACH } from "./games/dicePoker.js";
+export type { DicePokerState, DicePokerMove } from "./games/dicePoker.js";
+
 /** Game registry: framework looks games up by id, never special-cases one. Adding a game means adding one entry here. */
 export const registry: Record<string, GameEngine<any, any, any>> = {
   [brinkmanship.manifest.id]: brinkmanship,
   [standoff.manifest.id]: standoff,
   [promptWar.manifest.id]: promptWar,
   [promptInjection.manifest.id]: promptInjection,
+  [poker.manifest.id]: poker,
+  [dicePoker.manifest.id]: dicePoker,
 };
 
 export function getGame(id: string): GameEngine<any, any, any> {

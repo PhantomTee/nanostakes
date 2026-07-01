@@ -55,6 +55,21 @@ There is no back-and-forth — you get one shot to make your pitch as persuasive
 possible for this exact buyer and scenario.
 Respond ONLY with a single JSON object, no prose.`;
 
+const POKER_RULES = `You are playing simplified Texas Hold'Em poker for real USDC stakes against another AI agent.
+Your goal is to maximize your earnings. Bluff strategically based on your temperament.
+COOPERATIVE: Play conservatively, fold weak hands, check rather than raise.
+COMPETITIVE: Bet aggressively, bluff often, raise to pressure opponents.
+STRATEGIC: Read the board carefully, bet proportional to hand strength.
+NEUTRAL: Play mathematically optimal (pot odds, expected value).`;
+
+const DICE_POKER_RULES = `You are playing Farkle dice poker for real USDC stakes.
+Score points by keeping scoring dice combinations: ones=100, fives=50, three-of-a-kind=face×100 (ones=1000), three pairs=600, straight=1500.
+You must keep at least one scoring die per roll or you bust and lose turn points.
+COOPERATIVE: Bank early to avoid busting, steady accumulation.
+COMPETITIVE: Keep rolling for high scores, accept bust risk.
+STRATEGIC: Calculate expected value before deciding to re-roll.
+NEUTRAL: Re-roll when turn score < 300, bank when > 600.`;
+
 /** What this agent remembers about this specific opponent from prior settled matches — see packages/warden/src/memory.ts. */
 export interface OpponentMemory {
   matchesPlayed: number;
@@ -195,6 +210,70 @@ Respond as JSON: {"message": "<your response to the attacker>"}`;
 Write your pitch. Respond as JSON: {"pitch": "<your pitch>"}`;
     const parsed = await this.complete(user, PROMPT_WAR_RULES);
     return typeof parsed.pitch === "string" && parsed.pitch.trim() ? parsed.pitch.trim() : "I have nothing to offer.";
+  }
+
+  async decideBribe(ctx: {
+    round: number;
+    myValuation: number;
+    myClaim: number;
+    opponentClaim: number | undefined;
+    myAsk: number;
+    opponentAsk: number | undefined;
+    potUsdc: number;
+    opponentMemory?: OpponentMemory;
+  }): Promise<{ sendBribe: boolean; amount: number; message: string }> {
+    const user = `Round ${ctx.round}. The round resolved with conflicting asks.
+Your ask: ${ctx.myAsk.toFixed(2)}, opponent ask: ${ctx.opponentAsk?.toFixed(2) ?? "unknown"}.
+Pot size: $${ctx.potUsdc.toFixed(2)} USDC.${memorySummary(ctx.opponentMemory)}
+You may offer a side-payment (bribe) to your opponent to accept a better deal for you.
+If you send a bribe and opponent does NOT counter-bribe, they implicitly accept.
+Respond as JSON: {"sendBribe": <true|false>, "amount": <USDC amount 0..${(ctx.potUsdc * 0.15).toFixed(2)}>, "message": "<persuasion text, max 80 chars>"}`;
+    const parsed = await this.complete(user, BRINKMANSHIP_RULES);
+    return {
+      sendBribe: Boolean(parsed.sendBribe),
+      amount: Math.max(0, Math.min(num(parsed.amount, 0), ctx.potUsdc * 0.15)),
+      message: typeof parsed.message === "string" ? parsed.message.slice(0, 80) : "Consider this offer.",
+    };
+  }
+
+  async decidePokerMove(ctx: {
+    phase: string;
+    myHoleCards: [string, string];
+    communityCards: string[];
+    pot: number;
+    myBet: number;
+    currentHighBet: number;
+    stackRemaining: number;
+  }): Promise<{ type: "bet"; amount: number } | { type: "fold" }> {
+    const user = `Poker — ${ctx.phase}. Your hole cards: ${ctx.myHoleCards.join(", ")}.
+Community cards: ${ctx.communityCards.length > 0 ? ctx.communityCards.join(", ") : "none yet"}.
+Pot: $${ctx.pot.toFixed(2)}. Your current bet: $${ctx.myBet.toFixed(2)}. High bet to match: $${ctx.currentHighBet.toFixed(2)}.
+Stack remaining: $${ctx.stackRemaining.toFixed(2)}.
+Decide: fold or bet (amount ≥ ${ctx.currentHighBet.toFixed(2)} to call/raise, or 0 to check if no bet to match).
+Respond as JSON: {"type": "bet", "amount": <number>} or {"type": "fold"}`;
+    const parsed = await this.complete(user, POKER_RULES);
+    if (parsed.type === "fold") return { type: "fold" };
+    return { type: "bet", amount: Math.max(0, Math.min(num(parsed.amount, ctx.currentHighBet), ctx.stackRemaining)) };
+  }
+
+  async decideDicePokerMove(ctx: {
+    currentRoll: number[];
+    keptDice: number[];
+    turnScore: number;
+    totalScore: number;
+    opponentScore: number;
+    diceAvailable: number;
+  }): Promise<{ type: "roll"; keepIndices: number[] } | { type: "bank" }> {
+    const user = `Dice Poker (Farkle). Current roll: [${ctx.currentRoll.join(", ")}].
+Already kept this turn: [${ctx.keptDice.join(", ")}]. Turn score so far: ${ctx.turnScore} pts.
+Your total: ${ctx.totalScore} pts. Opponent total: ${ctx.opponentScore} pts. Dice left: ${ctx.diceAvailable}.
+Choose indices (0-based) of dice to keep from the current roll, then decide to roll again or bank.
+Respond as JSON: {"type": "roll", "keepIndices": [<indices to keep>]} to keep some dice and roll the rest,
+or {"type": "bank"} to bank your ${ctx.turnScore} points and end your turn.`;
+    const parsed = await this.complete(user, DICE_POKER_RULES);
+    if (parsed.type === "bank") return { type: "bank" };
+    const indices = Array.isArray(parsed.keepIndices) ? parsed.keepIndices.filter((i: unknown) => typeof i === "number") : [];
+    return { type: "roll", keepIndices: indices };
   }
 
   private async complete(userPrompt: string, rules: string): Promise<Record<string, unknown>> {

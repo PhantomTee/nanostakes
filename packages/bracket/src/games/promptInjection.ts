@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Address, EngineEvent, GameEngine, GameManifest, MatchResult } from "@nanostakes/shared";
+import type { Address, BrokerSeat, EngineEvent, GameEngine, GameManifest, MatchResult } from "@nanostakes/shared";
 
 /** Asymmetric attacker-vs-defender game, settled by an exact secret-string match rather than a payout formula — proves the Bracket plugin pattern works for turn-based, role-asymmetric games too. */
 export const ENTRY_STAKE_EACH = 2.5;
@@ -45,6 +45,10 @@ export interface PromptInjectionState {
   phase: "ATTACK" | "DEFEND" | "DONE";
   leaked: boolean;
   winner?: Address;
+  /** The asset used for stakes and payouts. Defaults to "USDC" when absent. */
+  stakeAsset?: "USDC" | "EURC";
+  /** Optional broker seat. */
+  broker?: BrokerSeat;
 }
 
 const manifest: GameManifest = {
@@ -54,10 +58,11 @@ const manifest: GameManifest = {
   maxPlayers: 2,
 };
 
-function initState(players: Address[]): PromptInjectionState {
+function initState(players: Address[], opts?: Record<string, unknown>): PromptInjectionState {
   if (players.length !== 2) throw new Error("Prompt Injection Battle requires exactly 2 players");
   const [a, b] = players;
   const [attacker, defender] = Math.random() < 0.5 ? [a, b] : [b, a];
+  const stakeAsset = (opts?.stakeAsset as "USDC" | "EURC") ?? "USDC";
   return {
     matchId: randomUUID(),
     players,
@@ -72,6 +77,8 @@ function initState(players: Address[]): PromptInjectionState {
     acted: { [a]: false, [b]: false },
     phase: "ATTACK",
     leaked: false,
+    stakeAsset,
+    broker: opts?.broker as BrokerSeat | undefined,
   };
 }
 

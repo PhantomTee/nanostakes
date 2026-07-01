@@ -47,6 +47,19 @@ export async function getEurcBalance(address: ViemAddress): Promise<{ balance: b
   return { balance, formatted: formatUnits(balance, EURC_DECIMALS) };
 }
 
+/** Transfers a specific EURC amount to `to` — used for match settlement payouts. */
+export async function transferEurc(privateKey: Hex, to: ViemAddress, amountUsdc: number): Promise<Hex> {
+  const account = privateKeyToAccount(privateKey);
+  const wallet = createWalletClient({ account, chain: arcChain, transport: http() });
+  const txHash = await wallet.writeContract({
+    address: EURC_ADDRESS,
+    abi: ERC20_ABI,
+    functionName: "transfer",
+    args: [to, parseUnits(amountUsdc.toFixed(EURC_DECIMALS), EURC_DECIMALS)],
+  });
+  return txHash;
+}
+
 /** Sends the full EURC balance to `to`, paid for by the holder's own wallet (Arc gas is USDC-denominated). */
 export async function withdrawEurc(privateKey: Hex, to: ViemAddress): Promise<{ amount: string; txHash: Hex } | null> {
   const account = privateKeyToAccount(privateKey);
