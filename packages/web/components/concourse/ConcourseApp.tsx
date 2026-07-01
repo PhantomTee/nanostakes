@@ -1,396 +1,1049 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { encodePacked, keccak256 } from "viem";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { apiUrl } from "@/lib/api";
+
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const EXPLORER_TX_BASE = "https://testnet.arcscan.app/tx/";
 const EXPLORER_ADDR_BASE = "https://testnet.arcscan.app/address/";
 
-/**
- * Mirrors packages/shared/src/index.ts's computeOfferCommitment exactly —
- * duplicated rather than imported, since the web package otherwise has no
- * dependency on @nanostakes/shared. This is the point of the commit-reveal
- * scheme: a spectator's own browser re-derives the hash from the revealed
- * (ask, escalate, nonce) and checks it against the commitment that was
- * already visible before the reveal, instead of trusting the Warden's word.
- */
-function computeOfferCommitment(ask: number, escalate: boolean, nonce: string): string {
-  const askScaled = BigInt(Math.round(ask * 1_000_000));
-  return keccak256(encodePacked(["uint256", "bool", "bytes32"], [askScaled, escalate, nonce as `0x${string}`]));
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function shortAddr(addr: string): string {
+  if (!addr || addr.length < 10) return addr;
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
 
-function txLink(hash?: string) {
-  if (!hash) return "";
-  if (!hash.startsWith("0x")) {
-    return `<span class="t-row sealed" style="display:inline;" title="Gateway transfer ID, settles on-chain in a later batch">${hash.slice(0, 8)}&hellip; (pending settlement)</span>`;
-  }
-  return `<a class="tx-link" href="${EXPLORER_TX_BASE}${hash}" target="_blank" rel="noopener">${hash.slice(0, 10)}&hellip;${hash.slice(-6)}</a>`;
-}
-function addrLink(addr: string) {
-  return `<a class="tx-link" href="${EXPLORER_ADDR_BASE}${addr}" target="_blank" rel="noopener">${addr}</a>`;
+function relativeTime(isoString?: string): string {
+  if (!isoString) return "";
+  const now = Date.now();
+  const then = new Date(isoString).getTime();
+  const diffMs = now - then;
+  if (diffMs < 0) return "just now";
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin} min ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr} hour${diffHr === 1 ? "" : "s"} ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  return `${diffDay} day${diffDay === 1 ? "" : "s"} ago`;
 }
 
-interface OnlineAgent {
-  id: string;
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+type MatchStatus = "ACTIVE" | "AWAITING_STAKES" | "SETTLED";
+type FilterTab = "ALL" | MatchStatus;
+
+interface MatchSummary {
+  matchId: string;
   name: string;
-  temperament: string;
-  sessionAddress: string;
-  standing: "ELITE" | "STEADY" | "CONTENDER" | "UNRANKED";
-  matchesPlayed: number;
-  netPnl: number;
+  gameId: string;
+  status: MatchStatus;
+  players: string[];
+  playerCount: number;
+  temperaments?: Record<string, string>;
+  createdAt?: string;
+  lastMoveAt?: string;
 }
 
-/** Who's actually waiting in the queue right now — the roster a challenge would target. */
-function OnlineAgents() {
-  const [agents, setAgents] = useState<OnlineAgent[]>([]);
+interface BrinkmanshipRound {
+  index: number;
+  basePot: number;
+  cap?: number;
+  claims: Record<string, number>;
+  offers: Record<string, number | null>;
+  offerCommitments?: Record<string, string>;
+  offerNonces?: Record<string, string | null>;
+  escalated: Record<string, boolean>;
+  messages: Array<{ from: string; to: string; text?: string; message?: string }>;
+  payoutFraction?: Record<string, number>;
+  resolved: boolean;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const res = await fetch(apiUrl("/agents/online"));
-        if (!res.ok || cancelled) return;
-        const { agents: list } = await res.json();
-        if (!cancelled) setAgents(list);
-      } catch {
-        /* transient — next poll will retry */
-      }
-    }
-    load();
-    const interval = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
+interface PublicMatch {
+  matchId: string;
+  gameId: string;
+  status: MatchStatus;
+  players: string[];
+  phase?: string;
+  currentRoundIndex?: number;
+  // Brinkmanship
+  rounds?: BrinkmanshipRound[];
+  // Standoff
+  choices?: Record<string, "COOPERATE" | "DEFECT" | null>;
+  // PromptWar
+  scenario?: string;
+  pitches?: Record<string, string>;
+  winner?: string;
+  judgeRationale?: string;
+  // PromptInjection
+  transcript?: Array<{ attempt: string; response: string }>;
+  attacker?: string;
+  defender?: string;
+  // Settlement
+  payoutTxs?: Record<string, string>;
+  stakeTxs?: Record<string, string>;
+  entryStakeEach?: number;
+  badges?: Record<string, { temperament?: string; standing?: string }>;
+  acted?: Record<string, boolean>;
+}
 
+// ─── Sub-components ──────────────────────────────────────────────────────────
+
+function StatusPill({ status }: { status: MatchStatus }) {
+  return <span className={`status-pill ${status}`}>{status.replace("_", " ")}</span>;
+}
+
+function GameBadge({ gameId }: { gameId: string }) {
   return (
-    <section className="section--tight">
-      <div className="wrap">
-        <p className="eyebrow" style={{ marginBottom: 10 }}>
-          Agents online ({agents.length})
-        </p>
-        {agents.length === 0 ? (
-          <p style={{ color: "var(--text-muted)" }}>No agents are queued right now.</p>
-        ) : (
-          <div className="player-grid">
-            {agents.map((a) => (
-              <div key={a.id} className="player-ticket">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                  <strong>{a.name}</strong>
-                  <span className={`seal on-ink--${a.standing}`}>{a.standing}</span>
-                </div>
-                <div className="badges">
-                  <span className="seal on-ink--STEADY" style={{ borderColor: "#5a5440", color: "#b8a8f0" }}>
-                    {a.temperament}
-                  </span>
-                </div>
-                <div className="addr" style={{ marginTop: 8 }}>
-                  {a.sessionAddress}
-                </div>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.78rem", margin: "8px 0 0" }}>
-                  {a.matchesPlayed} match{a.matchesPlayed === 1 ? "" : "es"} played &middot; net{" "}
-                  {a.netPnl >= 0 ? "+" : ""}
-                  {a.netPnl.toFixed(2)} USDC
-                </p>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
+    <span
+      style={{
+        display: "inline-block",
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.65rem",
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        fontWeight: 600,
+        padding: "2px 8px",
+        borderRadius: "999px",
+        border: "2px solid var(--ink)",
+        background: "var(--yellow)",
+        color: "var(--ink)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {gameId}
+    </span>
   );
 }
 
-export default function ConcourseApp() {
-  const usdcFlowRef = useRef<HTMLSpanElement>(null);
-  const eventFeedRef = useRef<HTMLDivElement>(null);
-  const pickerRef = useRef<HTMLSelectElement>(null);
-  const contentRef = useRef<HTMLDivElement>(null);
-  const ledgerTopRef = useRef<HTMLDivElement>(null);
-  const arenaRef = useRef<HTMLDivElement>(null);
+// ─── VIEW 1: Match Card Grid ──────────────────────────────────────────────────
 
-  useEffect(() => {
-    const picker = pickerRef.current!;
-    const content = contentRef.current!;
-    let pollHandle: ReturnType<typeof setInterval> | null = null;
-    let cancelled = false;
-    let arenaPlayers: string[] = [];
+interface MatchGridProps {
+  onSelectMatch: (matchId: string) => void;
+}
 
-    function shortAddr(addr: string) {
-      return `${addr.slice(0, 4)}…${addr.slice(-3)}`;
-    }
+function MatchGrid({ onSelectMatch }: MatchGridProps) {
+  const [matches, setMatches] = useState<MatchSummary[]>([]);
+  const [filter, setFilter] = useState<FilterTab>("ALL");
+  const cancelledRef = useRef(false);
 
-    function spawnArenaChip(actor: string, kind: "claim" | "offer" | "escalate" | "msg", text: string) {
-      const arena = arenaRef.current;
-      const track = arena?.querySelector<HTMLDivElement>("#arenaTrack");
-      if (!track) return;
-      const actorIndex = arenaPlayers.findIndex((p) => p.toLowerCase() === actor.toLowerCase());
-      if (actorIndex === -1) return;
-      const chip = document.createElement("div");
-      chip.className = `arena-chip kind-${kind} ${actorIndex === 1 ? "dir-rtl" : ""}`;
-      chip.textContent = text;
-      track.appendChild(chip);
-      const avatar = arena?.querySelector<HTMLDivElement>(`.arena-avatar[data-idx="${actorIndex}"]`);
-      avatar?.classList.add("pulse");
-      setTimeout(() => avatar?.classList.remove("pulse"), 500);
-      setTimeout(() => chip.remove(), 1150);
-    }
-
-    async function loadMatches() {
+  const loadMatches = useCallback(async () => {
+    try {
       const res = await fetch(apiUrl("/matches"));
-      const matches = await res.json();
-      const prev = picker.value;
-      picker.innerHTML = "";
-      if (matches.length === 0) {
-        picker.innerHTML = '<option value="">(no matches yet)</option>';
-        return;
+      if (!res.ok || cancelledRef.current) return;
+      const data = await res.json();
+      if (!cancelledRef.current) {
+        setMatches(Array.isArray(data) ? data : []);
       }
-      for (const m of matches) {
-        const opt = document.createElement("option");
-        opt.value = m.matchId;
-        opt.textContent = `${m.matchId.slice(0, 8)}… [${m.status}]`;
-        picker.appendChild(opt);
-      }
-      if (matches.some((m: any) => m.matchId === prev)) picker.value = prev;
-      startPolling();
+    } catch {
+      /* transient — next poll will retry */
     }
+  }, []);
 
-    function startPolling() {
-      if (pollHandle) clearInterval(pollHandle);
-      pollHandle = setInterval(render, 1000);
-      render();
-    }
-
-    async function render() {
-      const matchId = picker.value;
-      const arena = arenaRef.current;
-      if (!matchId) {
-        content.innerHTML = '<div id="empty" style="color:var(--text-muted);">Pick a match above.</div>';
-        if (arena) arena.style.display = "none";
-        return;
-      }
-      const res = await fetch(apiUrl(`/match/${matchId}/public`));
-      if (!res.ok) return;
-      const state = await res.json();
-      arenaPlayers = state.players;
-
-      // Update the arena ring's avatars in place — never touch #arenaTrack's
-      // innerHTML here, or every 1s poll would wipe out any in-flight chip
-      // animation spawned by spawnArenaChip() before it finishes.
-      if (arena) {
-        arena.style.display = state.players.length === 2 ? "flex" : "none";
-        state.players.forEach((p: string, i: number) => {
-          const avatar = arena.querySelector<HTMLDivElement>(`.arena-avatar[data-idx="${i}"]`);
-          if (!avatar) return;
-          const won = state.payoutTxs && state.payoutTxs[p];
-          avatar.classList.toggle("settled-win", !!won);
-          const badge = state.badges?.[p];
-          const dot = avatar.querySelector(".dot-label");
-          const label = avatar.querySelector(".label");
-          if (dot) dot.textContent = (badge?.temperament ?? p).slice(0, 2).toUpperCase();
-          if (label) label.textContent = shortAddr(p);
-        });
-      }
-
-      const playersHtml = state.players
-        .map((p: string) => {
-          const stakeTx = state.stakeTxs?.[p];
-          const badge = state.badges?.[p];
-          const badgesHtml = badge
-            ? `<div class="badges">${badge.temperament ? `<span class="seal on-ink--STEADY" style="border-color:#5a5440; color:#b8a8f0;">${badge.temperament}</span>` : ""}<span class="seal on-ink--${badge.standing}">${badge.standing}</span></div>`
-            : "";
-          return `<div class="player-ticket">
-            <div class="addr">${addrLink(p)}</div>
-            ${badgesHtml}
-            <div class="stake-line">staked: ${stakeTx ? txLink(stakeTx) : state.acted?.[p] ? "yes" : "n/a"}</div>
-          </div>`;
-        })
-        .join("");
-
-      const isBrinkmanship = Array.isArray(state.rounds);
-
-      const bodyHtml = isBrinkmanship
-        ? state.rounds
-            .map((r: any, i: number) => {
-              const isCurrent = i === state.currentRoundIndex && state.phase !== "DONE";
-              const claims = Object.entries(r.claims || {})
-                .map(([addr, c]) => `<div class="t-row claim">claim ${addr.slice(0, 8)}…: ${JSON.stringify(c)}</div>`)
-                .join("");
-              const offers = Object.entries(r.offers || {})
-                .map(([addr, o]) => {
-                  const short = addr.slice(0, 8);
-                  const commitment: string | undefined = r.offerCommitments?.[addr];
-                  const nonce: string | null | undefined = r.offerNonces?.[addr];
-                  if (o === null) {
-                    return commitment
-                      ? `<div class="t-row sealed">offer ${short}…: sealed <span class="commit-hash" title="${commitment}">commitment ${commitment.slice(0, 10)}&hellip;</span></div>`
-                      : `<div class="t-row sealed">offer ${short}…: sealed</div>`;
-                  }
-                  if (commitment && nonce) {
-                    const recomputed = computeOfferCommitment(Number(o), !!r.escalated?.[addr], nonce);
-                    const verified = recomputed.toLowerCase() === commitment.toLowerCase();
-                    return `<div class="t-row offer">offer ${short}…: ${JSON.stringify(o)} <span class="${verified ? "verify-ok" : "verify-bad"}" title="${commitment}">${verified ? "&check; verified" : "&cross; hash mismatch"}</span></div>`;
-                  }
-                  return `<div class="t-row offer">offer ${short}…: ${JSON.stringify(o)}</div>`;
-                })
-                .join("");
-              const messages = (r.messages || [])
-                .map((m: any) => `<div class="t-row msg">${m.from.slice(0, 8)}…: "${m.text ?? m.message ?? JSON.stringify(m)}"</div>`)
-                .join("");
-              return `<div class="round-panel ${isCurrent ? "current" : ""}">
-                <h3>Round ${r.index + 1} ${r.escalated ? '<span class="escalated-tag">ESCALATED</span>' : ""} ${r.resolved ? "(resolved)" : ""}</h3>
-                ${messages}
-                ${claims}
-                ${offers}
-              </div>`;
-            })
-            .join("")
-        : `<div class="round-panel">
-            <h3>Standoff: simultaneous commit</h3>
-            ${Object.entries(state.choices || {})
-              .map(([addr, c]) =>
-                c === null
-                  ? `<div class="t-row sealed">choice ${addr.slice(0, 8)}…: sealed</div>`
-                  : `<div class="t-row claim">choice ${addr.slice(0, 8)}…: ${c}</div>`,
-              )
-              .join("")}
-          </div>`;
-
-      const payoutsHtml = state.payoutTxs
-        ? `<div style="margin-top:18px; display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
-            <div class="stamp-seal stamp-seal--settle is-landing">Settled</div>
-            <div style="font-family:var(--font-mono); font-size:0.85rem;">
-              ${Object.entries(state.payoutTxs).map(([addr, tx]) => `${addr.slice(0, 8)}… → ${txLink(tx as string)}`).join("<br/>")}
-            </div>
-          </div>`
-        : "";
-
-      const progress = isBrinkmanship ? `round ${state.currentRoundIndex + 1}/${state.rounds.length}` : "single round";
-
-      content.innerHTML = `
-        <div><span class="status-pill ${state.status}">${state.status}</span> · phase: ${state.phase} · ${progress}</div>
-        <div class="player-grid" style="margin-top:14px">${playersHtml}</div>
-        ${bodyHtml}
-        ${payoutsHtml}
-      `;
-    }
-
-    async function renderLedgerTop() {
-      const res = await fetch(apiUrl("/ledger"));
-      if (!res.ok) return;
-      const { leaderboard } = await res.json();
-      const el = ledgerTopRef.current;
-      if (!el) return;
-      if (leaderboard.length === 0) {
-        el.innerHTML = '<div style="color:var(--text-muted)">No settled matches yet.</div>';
-        return;
-      }
-      const rows = leaderboard
-        .slice(0, 5)
-        .map(
-          (a: any, i: number) => `<tr>
-            <td>${i + 1}</td>
-            <td>${addrLink(a.address)}</td>
-            <td>${a.temperament ?? "n/a"}</td>
-            <td><span class="seal on-ink--${a.standing}">${a.standing}</span></td>
-            <td>${a.wins}/${a.losses}/${a.ties}</td>
-            <td style="color:${a.netPnl >= 0 ? "var(--settle-bright)" : "var(--stamp-bright)"}">${a.netPnl >= 0 ? "+" : ""}${a.netPnl.toFixed(4)}</td>
-          </tr>`,
-        )
-        .join("");
-      el.innerHTML = `<div class="feed-panel" style="max-height:none; padding:14px 20px;">
-        <table style="width:100%; border-collapse:collapse; font-family:var(--font-mono); font-size:0.82rem;">
-          <thead><tr style="color:var(--text-muted); text-align:left;"><th>Rank</th><th>Agent</th><th>Temp.</th><th>Standing</th><th>W/L/T</th><th>Net</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>`;
-    }
-
-    function pulseFlow() {
-      const el = usdcFlowRef.current;
-      if (!el) return;
-      el.classList.remove("pulse");
-      void el.offsetWidth;
-      el.classList.add("pulse");
-    }
-
-    function appendEvent(evt: any) {
-      const feed = eventFeedRef.current;
-      if (!feed) return;
-      const time = new Date(evt.at).toLocaleTimeString();
-      const summary =
-        evt.type === "match.created"
-          ? `match ${evt.matchId.slice(0, 8)}… created (${evt.gameId}, ${(evt.data.players || []).length} players)`
-          : evt.type === "match.staked"
-            ? `${(evt.data.payer || "").slice(0, 8)}… staked USDC on ${evt.matchId.slice(0, 8)}…${evt.data.status === "ACTIVE" ? ", both staked, match ACTIVE" : ""}`
-            : evt.type === "match.move"
-              ? `${(evt.data.player || "").slice(0, 8)}… played ${JSON.stringify(evt.data.move)} on ${evt.matchId.slice(0, 8)}…`
-              : `match ${evt.matchId.slice(0, 8)}… SETTLED, payouts: ${Object.keys(evt.data.payoutTxs || {}).length}`;
-      const div = document.createElement("div");
-      div.className = `feed-line ${evt.type.replace(".", "-")}`;
-      div.innerHTML = `<span class="t">${time}</span>${summary}`;
-      feed.prepend(div);
-      while (feed.childNodes.length > 50) feed.removeChild(feed.lastChild!);
-      if (evt.type === "match.staked" || evt.type === "match.settled") pulseFlow();
-      if (evt.type === "match.move" && evt.matchId === picker.value) {
-        const move = evt.data.move;
-        const actor = evt.data.player;
-        if (move?.type === "claim") spawnArenaChip(actor, "claim", `claims ${typeof move.value === "number" ? move.value.toFixed(2) : move.value}`);
-        else if (move?.type === "offer")
-          spawnArenaChip(actor, move.escalate ? "escalate" : "offer", `offers ${typeof move.ask === "number" ? move.ask.toFixed(2) : move.ask}${move.escalate ? " ⚡" : ""}`);
-        else if (move?.type === "message") spawnArenaChip(actor, "msg", "message");
-        else if (move?.type === "choice") spawnArenaChip(actor, "claim", `chose ${move.value}`);
-      }
-      if (evt.matchId === picker.value) render();
-      if (evt.type === "match.created") loadMatches();
-      if (evt.type === "match.settled" || evt.type === "match.staked") renderLedgerTop();
-    }
+  // SSE for live updates
+  useEffect(() => {
+    cancelledRef.current = false;
+    loadMatches();
+    const interval = setInterval(loadMatches, 5000);
 
     let es: EventSource | null = null;
     function connectEvents() {
       es = new EventSource(apiUrl("/events"));
       es.onmessage = (msg) => {
         try {
-          appendEvent(JSON.parse(msg.data));
+          const evt = JSON.parse(msg.data);
+          if (
+            evt.type === "match.created" ||
+            evt.type === "match.staked" ||
+            evt.type === "match.settled"
+          ) {
+            loadMatches();
+          }
         } catch {
-          /* ignore the leading ":ok" comment line */
+          /* ignore leading :ok comment */
         }
       };
       es.onerror = () => {
         es?.close();
-        if (!cancelled) setTimeout(connectEvents, 2000);
+        if (!cancelledRef.current) setTimeout(connectEvents, 2000);
       };
     }
-
-    function onRefreshClick() {
-      loadMatches();
-    }
-    function onPickerChange() {
-      startPolling();
-    }
-
-    const refreshBtn = document.getElementById("refreshList");
-    refreshBtn?.addEventListener("click", onRefreshClick);
-    picker.addEventListener("change", onPickerChange);
-
-    loadMatches();
-    renderLedgerTop();
     connectEvents();
-    const matchesInterval = setInterval(loadMatches, 5000);
-    const ledgerInterval = setInterval(renderLedgerTop, 6000);
 
     return () => {
-      cancelled = true;
-      if (pollHandle) clearInterval(pollHandle);
-      clearInterval(matchesInterval);
-      clearInterval(ledgerInterval);
+      cancelledRef.current = true;
+      clearInterval(interval);
       es?.close();
-      refreshBtn?.removeEventListener("click", onRefreshClick);
-      picker.removeEventListener("change", onPickerChange);
     };
-  }, []);
+  }, [loadMatches]);
+
+  const TABS: { label: string; value: FilterTab }[] = [
+    { label: "All", value: "ALL" },
+    { label: "Active", value: "ACTIVE" },
+    { label: "Awaiting Stakes", value: "AWAITING_STAKES" },
+    { label: "Settled", value: "SETTLED" },
+  ];
+
+  const filtered =
+    filter === "ALL" ? matches : matches.filter((m) => m.status === filter);
+
+  return (
+    <div>
+      {/* Filter bar */}
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          marginBottom: 24,
+        }}
+      >
+        {TABS.map((tab) => (
+          <button
+            key={tab.value}
+            type="button"
+            onClick={() => setFilter(tab.value)}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.72rem",
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              fontWeight: 600,
+              padding: "7px 16px",
+              borderRadius: "999px",
+              border: "2px solid var(--ink)",
+              cursor: "pointer",
+              background: filter === tab.value ? "var(--ink)" : "transparent",
+              color: filter === tab.value ? "var(--bg)" : "var(--text)",
+              transition: "background 0.12s, color 0.12s",
+            }}
+          >
+            {tab.label}
+            {tab.value === "ALL" ? ` (${matches.length})` : ""}
+          </button>
+        ))}
+      </div>
+
+      {/* Card grid */}
+      {filtered.length === 0 ? (
+        <div
+          style={{
+            padding: "48px 24px",
+            textAlign: "center",
+            color: "var(--text-muted)",
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.85rem",
+            background: "var(--panel)",
+            border: "2px solid var(--ink)",
+            borderRadius: 10,
+          }}
+        >
+          {matches.length === 0 ? "No matches yet. Check back soon." : `No ${filter.toLowerCase().replace("_", " ")} matches.`}
+        </div>
+      ) : (
+        <div className="player-grid">
+          {filtered.map((match) => (
+            <MatchCard
+              key={match.matchId}
+              match={match}
+              onClick={() => onSelectMatch(match.matchId)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MatchCard({
+  match,
+  onClick,
+}: {
+  match: MatchSummary;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        all: "unset",
+        display: "block",
+        cursor: "pointer",
+        textAlign: "left",
+        width: "100%",
+      }}
+    >
+      <div
+        className="player-ticket"
+        style={{
+          transition: "box-shadow 0.12s, transform 0.12s",
+          position: "relative",
+          overflow: "hidden",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLDivElement).style.boxShadow = "4px 4px 0 0 var(--ink)";
+          (e.currentTarget as HTMLDivElement).style.transform = "translate(-2px, -2px)";
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLDivElement).style.boxShadow = "";
+          (e.currentTarget as HTMLDivElement).style.transform = "";
+        }}
+      >
+        {/* Top row: room name + status */}
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "flex-start",
+            gap: 8,
+            marginBottom: 10,
+          }}
+        >
+          <strong
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.88rem",
+              fontWeight: 700,
+              color: "var(--text)",
+              lineHeight: 1.3,
+              minWidth: 0,
+              wordBreak: "break-all",
+            }}
+          >
+            {match.name || match.matchId.slice(0, 12) + "…"}
+          </strong>
+          <StatusPill status={match.status} />
+        </div>
+
+        {/* Game badge + player count */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            marginBottom: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <GameBadge gameId={match.gameId} />
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.7rem",
+              color: "var(--text-muted)",
+            }}
+          >
+            {match.playerCount ?? match.players?.length ?? 0} agent{(match.playerCount ?? match.players?.length ?? 0) === 1 ? "" : "s"}
+          </span>
+          {match.createdAt && (
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: "0.7rem",
+                color: "var(--text-muted)",
+                marginLeft: "auto",
+              }}
+            >
+              {relativeTime(match.createdAt)}
+            </span>
+          )}
+        </div>
+
+        {/* Players */}
+        {match.players && match.players.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {match.players.slice(0, 2).map((addr, i) => (
+              <div key={addr} style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 16,
+                    height: 16,
+                    borderRadius: "50%",
+                    border: "2px solid var(--ink)",
+                    background: i === 0 ? "var(--panel-2)" : "var(--yellow)",
+                    flexShrink: 0,
+                  }}
+                />
+                <a
+                  href={`${EXPLORER_ADDR_BASE}${addr}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="addr-link"
+                  style={{ fontFamily: "var(--font-mono)", fontSize: "0.75rem" }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {shortAddr(addr)}
+                </a>
+                {match.temperaments?.[addr] && (
+                  <span
+                    className="seal on-ink--STEADY"
+                    style={{ fontSize: "0.6rem", padding: "1px 6px" }}
+                  >
+                    {match.temperaments[addr]}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Arrow indicator */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 14,
+            right: 14,
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.8rem",
+            color: "var(--text-muted)",
+          }}
+        >
+          →
+        </div>
+      </div>
+    </button>
+  );
+}
+
+// ─── VIEW 2: Chat Transcript ──────────────────────────────────────────────────
+
+interface ChatViewProps {
+  matchId: string;
+  onBack: () => void;
+}
+
+function ChatView({ matchId, onBack }: ChatViewProps) {
+  const [match, setMatch] = useState<PublicMatch | null>(null);
+  const [loading, setLoading] = useState(true);
+  const chatBodyRef = useRef<HTMLDivElement>(null);
+  const cancelledRef = useRef(false);
+
+  const loadMatch = useCallback(async () => {
+    try {
+      const res = await fetch(apiUrl(`/match/${matchId}/public`));
+      if (!res.ok || cancelledRef.current) return;
+      const data = await res.json();
+      if (!cancelledRef.current) {
+        setMatch(data);
+        setLoading(false);
+      }
+    } catch {
+      if (!cancelledRef.current) setLoading(false);
+    }
+  }, [matchId]);
+
+  useEffect(() => {
+    cancelledRef.current = false;
+    setLoading(true);
+    loadMatch();
+    return () => {
+      cancelledRef.current = true;
+    };
+  }, [loadMatch]);
+
+  // Poll when active
+  useEffect(() => {
+    if (!match || match.status !== "ACTIVE") return;
+    const interval = setInterval(loadMatch, 4000);
+    return () => clearInterval(interval);
+  }, [match, loadMatch]);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    const el = chatBodyRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [match]);
+
+  if (loading) {
+    return (
+      <div style={{ padding: "48px 0", textAlign: "center", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+        Loading match…
+      </div>
+    );
+  }
+
+  if (!match) {
+    return (
+      <div style={{ padding: "48px 0", textAlign: "center", color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+        Match not found.
+      </div>
+    );
+  }
+
+  const p0 = match.players?.[0];
+  const p1 = match.players?.[1];
+
+  return (
+    <div>
+      {/* Chat header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "14px 20px",
+          background: "var(--panel)",
+          border: "2px solid var(--ink)",
+          borderRadius: "10px 10px 0 0",
+          flexWrap: "wrap",
+        }}
+      >
+        <button
+          type="button"
+          onClick={onBack}
+          className="btn btn--ghost"
+          style={{ padding: "7px 14px", minHeight: 36, fontSize: "0.8rem" }}
+        >
+          ← Back
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <strong style={{ fontFamily: "var(--font-mono)", fontSize: "0.95rem", fontWeight: 700 }}>
+              {(match as any).name || matchId.slice(0, 12) + "…"}
+            </strong>
+            <StatusPill status={match.status} />
+            {match.status === "ACTIVE" && (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 4,
+                  fontFamily: "var(--font-mono)",
+                  fontSize: "0.68rem",
+                  color: "var(--settle-bright)",
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                }}
+              >
+                <span className="pulse-dot" style={{ width: 6, height: 6 }} />
+                Live
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 4,
+              flexWrap: "wrap",
+            }}
+          >
+            <GameBadge gameId={match.gameId} />
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.7rem", color: "var(--text-muted)" }}>
+              {match.players?.length ?? 0} agents
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Chat body */}
+      <div
+        ref={chatBodyRef}
+        style={{
+          background: "var(--panel)",
+          borderLeft: "2px solid var(--ink)",
+          borderRight: "2px solid var(--ink)",
+          padding: "16px 20px",
+          overflowY: "auto",
+          maxHeight: "calc(100vh - 260px)",
+          scrollBehavior: "smooth",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
+        {/* Player legend */}
+        {p0 && p1 && (
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 12,
+              padding: "8px 12px",
+              background: "var(--bg)",
+              border: "2px solid var(--ink)",
+              borderRadius: 8,
+              flexWrap: "wrap",
+              gap: 8,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", border: "2px solid var(--ink)", background: "var(--panel-2)", flexShrink: 0 }} />
+              <a
+                href={`${EXPLORER_ADDR_BASE}${p0}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="addr-link"
+                style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}
+              >
+                {shortAddr(p0)}
+              </a>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "var(--text-muted)" }}>← P1</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.65rem", color: "var(--text-muted)" }}>P2 →</span>
+              <a
+                href={`${EXPLORER_ADDR_BASE}${p1}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="addr-link"
+                style={{ fontFamily: "var(--font-mono)", fontSize: "0.72rem" }}
+              >
+                {shortAddr(p1)}
+              </a>
+              <span style={{ display: "inline-block", width: 12, height: 12, borderRadius: "50%", border: "2px solid var(--ink)", background: "var(--yellow)", flexShrink: 0 }} />
+            </div>
+          </div>
+        )}
+
+        {/* Game-specific chat rendering */}
+        <ChatContent match={match} p0={p0} p1={p1} />
+      </div>
+
+      {/* Settlement footer */}
+      {match.payoutTxs && Object.keys(match.payoutTxs).length > 0 && (
+        <div
+          style={{
+            background: "var(--panel)",
+            border: "2px solid var(--ink)",
+            borderTop: "2px dashed var(--settle)",
+            borderRadius: "0 0 10px 10px",
+            padding: "14px 20px",
+          }}
+        >
+          <SystemMsg text="─────────────── Settled ───────────────" />
+          {Object.entries(match.payoutTxs).map(([addr, txHash]) => {
+            const isP0 = p0 && addr.toLowerCase() === p0.toLowerCase();
+            const pLabel = isP0 ? "P1" : "P2";
+            const fraction = (() => {
+              if (match.rounds) {
+                const lastResolved = [...(match.rounds ?? [])].reverse().find(r => r.resolved && r.payoutFraction?.[addr] != null);
+                if (lastResolved?.payoutFraction?.[addr] != null) {
+                  const pot = lastResolved.basePot ?? 0;
+                  const frac = lastResolved.payoutFraction![addr];
+                  return `$${(pot * frac).toFixed(4)} USDC`;
+                }
+              }
+              return null;
+            })();
+            return (
+              <div key={addr} style={{ fontFamily: "var(--font-mono)", fontSize: "0.78rem", textAlign: "center", padding: "4px 0", color: "var(--settle)" }}>
+                {pLabel} ({shortAddr(addr)}) received {fraction ?? "USDC"}{" "}
+                {txHash && (
+                  <a
+                    href={txHash.startsWith("0x") ? `${EXPLORER_TX_BASE}${txHash}` : undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="tx-link"
+                    style={{ fontSize: "0.72rem" }}
+                  >
+                    {txHash.startsWith("0x") ? `${txHash.slice(0, 10)}…${txHash.slice(-6)}` : `${txHash.slice(0, 8)}… (pending)`}
+                  </a>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* No settlement yet footer */}
+      {!match.payoutTxs && (
+        <div
+          style={{
+            background: "var(--panel)",
+            border: "2px solid var(--ink)",
+            borderTop: "1px solid var(--panel-2)",
+            borderRadius: "0 0 10px 10px",
+            padding: "10px 20px",
+            textAlign: "center",
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.7rem",
+            color: "var(--text-muted)",
+          }}
+        >
+          {match.status === "ACTIVE" ? "Match in progress — refreshing every 4s" : match.status === "AWAITING_STAKES" ? "Awaiting both players to stake" : "No payout data"}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Chat Content: routes to per-game renderers ──────────────────────────────
+
+function ChatContent({ match, p0, p1 }: { match: PublicMatch; p0?: string; p1?: string }) {
+  if (Array.isArray(match.rounds)) {
+    return <BrinkmanshipChat match={match} p0={p0} p1={p1} />;
+  }
+  if (match.choices !== undefined) {
+    return <StandoffChat match={match} p0={p0} p1={p1} />;
+  }
+  if (match.scenario !== undefined || match.pitches !== undefined) {
+    return <PromptWarChat match={match} p0={p0} p1={p1} />;
+  }
+  if (match.transcript !== undefined || match.attacker !== undefined) {
+    return <PromptInjectionChat match={match} p0={p0} p1={p1} />;
+  }
+  return (
+    <SystemMsg text="Match data is loading or game type is unknown." />
+  );
+}
+
+// ─── Bubble components ────────────────────────────────────────────────────────
+
+function Bubble({
+  addr,
+  side,
+  children,
+  timestamp,
+}: {
+  addr?: string;
+  side: "left" | "right" | "system";
+  children: React.ReactNode;
+  timestamp?: string;
+}) {
+  if (side === "system") {
+    return (
+      <div
+        style={{
+          textAlign: "center",
+          color: "var(--text-muted)",
+          fontFamily: "var(--font-mono)",
+          fontSize: "0.72rem",
+          padding: "6px 0",
+          lineHeight: 1.5,
+        }}
+      >
+        {children}
+      </div>
+    );
+  }
+
+  const isLeft = side === "left";
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: isLeft ? "flex-start" : "flex-end",
+        marginBottom: 8,
+      }}
+    >
+      {addr && (
+        <a
+          href={`${EXPLORER_ADDR_BASE}${addr}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="addr-link"
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.65rem",
+            marginBottom: 3,
+            display: "block",
+          }}
+        >
+          {shortAddr(addr)}
+        </a>
+      )}
+      <div
+        style={{
+          maxWidth: "72%",
+          padding: "9px 14px",
+          background: isLeft ? "var(--panel-2)" : "var(--yellow)",
+          color: isLeft ? "var(--text)" : "var(--ink)",
+          border: "2px solid var(--ink)",
+          // Brutalist: zero radius on 3 corners, 10px on the outer corner only
+          borderRadius: isLeft ? "0 10px 10px 10px" : "10px 0 10px 10px",
+          fontFamily: "var(--font-body)",
+          fontSize: "0.88rem",
+          lineHeight: 1.5,
+          wordBreak: "break-word",
+        }}
+      >
+        {children}
+      </div>
+      {timestamp && (
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: "0.6rem",
+            color: "var(--text-muted)",
+            marginTop: 3,
+          }}
+        >
+          {timestamp}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function SystemMsg({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        textAlign: "center",
+        color: "var(--text-muted)",
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.72rem",
+        padding: "5px 0",
+        lineHeight: 1.6,
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+function MonoData({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>
+      {children}
+    </span>
+  );
+}
+
+// ─── Brinkmanship ─────────────────────────────────────────────────────────────
+
+function BrinkmanshipChat({ match, p0, p1 }: { match: PublicMatch; p0?: string; p1?: string }) {
+  const rounds = match.rounds ?? [];
+
+  function sideOf(addr: string): "left" | "right" {
+    return p1 && addr.toLowerCase() === p1.toLowerCase() ? "right" : "left";
+  }
+
+  return (
+    <>
+      {rounds.map((r) => {
+        const potLabel = r.basePot != null ? `$${r.basePot.toFixed(2)} pot` : "";
+        const capLabel = r.cap != null ? ` · cap $${r.cap.toFixed(2)}` : "";
+        return (
+          <div key={r.index} style={{ marginBottom: 16 }}>
+            {/* Round header */}
+            <SystemMsg text={`───── Round ${r.index + 1}${potLabel ? ` · ${potLabel}` : ""}${capLabel} ─────`} />
+
+            {/* Claims */}
+            {Object.entries(r.claims ?? {}).map(([addr, c]) => (
+              <Bubble key={`claim-${addr}`} addr={addr} side={sideOf(addr)}>
+                <MonoData>Claimed {typeof c === "number" ? `${(c * 100).toFixed(0)}%` : String(c)}</MonoData>
+              </Bubble>
+            ))}
+
+            {/* Messages */}
+            {(r.messages ?? []).map((m, mi) => {
+              const fromSide = sideOf(m.from);
+              return (
+                <Bubble key={`msg-${mi}`} addr={m.from} side={fromSide}>
+                  {m.text ?? m.message ?? JSON.stringify(m)}
+                </Bubble>
+              );
+            })}
+
+            {/* Offers */}
+            {(() => {
+              const offerEntries = Object.entries(r.offers ?? {});
+              if (offerEntries.length === 0) return null;
+              const allSealed = offerEntries.every(([, o]) => o === null);
+              if (allSealed) {
+                return <SystemMsg text="Both offers sealed 🔒" />;
+              }
+              return offerEntries.map(([addr, o]) => {
+                const side = sideOf(addr);
+                const esc = r.escalated?.[addr];
+                if (o === null) {
+                  return (
+                    <Bubble key={`offer-${addr}`} addr={addr} side={side}>
+                      <MonoData>Offer sealed 🔒</MonoData>
+                    </Bubble>
+                  );
+                }
+                const capInfo = esc && r.cap != null ? ` (escalated ↑ $${r.cap.toFixed(2)})` : "";
+                return (
+                  <Bubble key={`offer-${addr}`} addr={addr} side={side}>
+                    <MonoData>
+                      Asked {typeof o === "number" ? `${(Number(o) * 100).toFixed(0)}%` : String(o)}
+                      {esc ? " ⚡" : ""}
+                      {capInfo}
+                    </MonoData>
+                  </Bubble>
+                );
+              });
+            })()}
+
+            {/* Resolution system messages */}
+            {r.resolved && (() => {
+              const payouts = r.payoutFraction ?? {};
+              const payoutEntries = Object.entries(payouts);
+              const allPositive = payoutEntries.every(([, f]) => (f as number) > 0);
+              const summaries = payoutEntries.map(([addr, frac]) => {
+                const pct = typeof frac === "number" ? `${(frac * 100).toFixed(0)}%` : String(frac);
+                const amt = r.basePot != null && typeof frac === "number" ? ` ($${(r.basePot * frac).toFixed(4)})` : "";
+                return `${shortAddr(addr)} +${pct}${amt}`;
+              });
+              if (allPositive) {
+                return <SystemMsg text={`✓ Compatible — ${summaries.join("  ")}`} />;
+              }
+              return <SystemMsg text={`✗ Conflict — ${summaries.join("  ")}`} />;
+            })()}
+          </div>
+        );
+      })}
+
+      {rounds.length === 0 && (
+        <SystemMsg text="Waiting for round data…" />
+      )}
+    </>
+  );
+}
+
+// ─── Standoff ─────────────────────────────────────────────────────────────────
+
+function StandoffChat({ match, p0, p1 }: { match: PublicMatch; p0?: string; p1?: string }) {
+  const choices = match.choices ?? {};
+  const entries = Object.entries(choices);
+  const allSealed = entries.every(([, c]) => c === null);
+
+  function sideOf(addr: string): "left" | "right" {
+    return p1 && addr.toLowerCase() === p1.toLowerCase() ? "right" : "left";
+  }
+
+  return (
+    <>
+      {allSealed ? (
+        <SystemMsg text="Both choices sealed 🔒" />
+      ) : (
+        entries.map(([addr, choice]) => {
+          if (choice === null) {
+            return (
+              <Bubble key={addr} addr={addr} side={sideOf(addr)}>
+                <MonoData>Choice sealed 🔒</MonoData>
+              </Bubble>
+            );
+          }
+          return (
+            <Bubble key={addr} addr={addr} side={sideOf(addr)}>
+              <MonoData>{choice}</MonoData>
+            </Bubble>
+          );
+        })
+      )}
+
+      {match.status === "SETTLED" && match.payoutTxs && (
+        <SystemMsg text={`Result: match settled — see payouts below`} />
+      )}
+    </>
+  );
+}
+
+// ─── Prompt War ───────────────────────────────────────────────────────────────
+
+function PromptWarChat({ match, p0, p1 }: { match: PublicMatch; p0?: string; p1?: string }) {
+  function sideOf(addr: string): "left" | "right" {
+    return p1 && addr.toLowerCase() === p1.toLowerCase() ? "right" : "left";
+  }
+
+  return (
+    <>
+      {match.scenario && (
+        <SystemMsg text={`Scenario: "${match.scenario}"`} />
+      )}
+
+      {match.pitches && Object.entries(match.pitches).map(([addr, pitch]) => (
+        <Bubble key={addr} addr={addr} side={sideOf(addr)}>
+          {pitch}
+        </Bubble>
+      ))}
+
+      {match.pitches && Object.keys(match.pitches).length < (match.players?.length ?? 0) && !match.winner && (
+        <SystemMsg text="Waiting for all pitches…" />
+      )}
+
+      {match.pitches && Object.keys(match.pitches).length >= (match.players?.length ?? 2) && !match.winner && (
+        <SystemMsg text="Judge evaluating…" />
+      )}
+
+      {match.winner && (
+        <SystemMsg
+          text={`Winner: ${shortAddr(match.winner)}${match.judgeRationale ? ` — "${match.judgeRationale}"` : ""}`}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Prompt Injection ─────────────────────────────────────────────────────────
+
+function PromptInjectionChat({ match, p0, p1 }: { match: PublicMatch; p0?: string; p1?: string }) {
+  const transcript = match.transcript ?? [];
+  const attacker = match.attacker;
+  const defender = match.defender;
+
+  const attackerLabel = attacker ? shortAddr(attacker) : "Attacker";
+  const defenderLabel = defender ? shortAddr(defender) : "Defender";
+
+  function attackerSide(): "left" | "right" {
+    if (!attacker || !p1) return "left";
+    return p1.toLowerCase() === attacker.toLowerCase() ? "right" : "left";
+  }
+  function defenderSide(): "left" | "right" {
+    return attackerSide() === "left" ? "right" : "left";
+  }
+
+  return (
+    <>
+      <SystemMsg
+        text={`${attackerLabel} is the Attacker · ${defenderLabel} is the Defender · 6 turns max`}
+      />
+
+      {transcript.map((turn, i) => (
+        <div key={i} style={{ marginBottom: 4 }}>
+          <SystemMsg text={`Turn ${i + 1}/6`} />
+          <Bubble addr={attacker} side={attackerSide()}>
+            {turn.attempt}
+          </Bubble>
+          <Bubble addr={defender} side={defenderSide()}>
+            {turn.response}
+          </Bubble>
+        </div>
+      ))}
+
+      {match.status === "ACTIVE" && transcript.length < 6 && (
+        <SystemMsg text={`Turn ${transcript.length + 1}/6 — waiting…`} />
+      )}
+
+      {match.status === "SETTLED" && match.winner && (
+        <>
+          {match.winner.toLowerCase() === (attacker ?? "").toLowerCase() ? (
+            <SystemMsg text={`💀 Attacker wins — leaked on turn ${transcript.length}`} />
+          ) : (
+            <SystemMsg text={`🏆 Defender wins — secret held all ${transcript.length} turns`} />
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+// ─── Main ConcourseApp ────────────────────────────────────────────────────────
+
+export default function ConcourseApp() {
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+
+  function handleSelectMatch(matchId: string) {
+    setSelectedMatchId(matchId);
+  }
+
+  function handleBack() {
+    setSelectedMatchId(null);
+  }
 
   return (
     <>
@@ -398,92 +1051,31 @@ export default function ConcourseApp() {
         <div className="wrap">
           <p className="eyebrow">The live floor</p>
           <h1 style={{ fontSize: "clamp(2rem,4.2vw,3rem)" }}>
-            No private valuations shown. No sealed offers shown early.
+            Nanostakes Arena Concourse
           </h1>
           <p className="dek">
-            Everything below is the same public view every player sees, pulled straight from the Warden&apos;s
-            event feed as it happens.
+            Live match feed — click any card to watch the full transcript as it unfolds.
+            Every event is the same public view every spectator sees.
           </p>
         </div>
       </section>
 
-      <OnlineAgents />
-
       <section className="section--tight">
         <div className="wrap">
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: 10,
-              marginBottom: 10,
-            }}
-          >
-            <p className="eyebrow" style={{ margin: 0 }}>
-              Live event feed <span ref={usdcFlowRef} className="flow-dot" title="USDC flow indicator"></span>
-            </p>
-          </div>
-          <div ref={eventFeedRef} id="eventFeed" className="feed-panel"></div>
-        </div>
-      </section>
-
-      <section className="section--tight">
-        <div className="wrap">
-          <div className="matchbar">
-            <select ref={pickerRef} id="matchPicker" aria-label="Choose a match to watch"></select>
-            <button className="btn btn--ghost" id="refreshList" type="button">
-              Refresh match list
-            </button>
-          </div>
-
-          <div ref={arenaRef} className="arena-ring" style={{ display: "none" }}>
-            <div className="arena-track" id="arenaTrack"></div>
-            <div className="arena-avatar" data-idx="0">
-              <div className="dot">
-                <span className="dot-label">??</span>
-                <span className="burst" aria-hidden="true">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <span key={i} className="spark" style={{ "--i": i } as CSSProperties} />
-                  ))}
-                </span>
-              </div>
-              <span className="label">—</span>
-            </div>
-            <div className="arena-avatar" data-idx="1">
-              <div className="dot">
-                <span className="dot-label">??</span>
-                <span className="burst" aria-hidden="true">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <span key={i} className="spark" style={{ "--i": i } as CSSProperties} />
-                  ))}
-                </span>
-              </div>
-              <span className="label">—</span>
-            </div>
-          </div>
-
-          <div ref={contentRef} id="content">
-            <div id="empty" style={{ color: "var(--text-muted)" }}>
-              Pick a match above.
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="section section--tight">
-        <div className="wrap">
-          <div className="section-head">
-            <p className="eyebrow">Standings preview</p>
-            <h2>Top of the ledger right now.</h2>
-          </div>
-          <div ref={ledgerTopRef} id="ledgerTop"></div>
-          <div style={{ marginTop: 18 }}>
-            <a className="btn btn--ghost" href="/ledger">
-              Open the full ledger →
-            </a>
-          </div>
+          {selectedMatchId ? (
+            <ChatView
+              key={selectedMatchId}
+              matchId={selectedMatchId}
+              onBack={handleBack}
+            />
+          ) : (
+            <>
+              <p className="eyebrow" style={{ marginBottom: 16 }}>
+                All matches
+              </p>
+              <MatchGrid onSelectMatch={handleSelectMatch} />
+            </>
+          )}
         </div>
       </section>
 
