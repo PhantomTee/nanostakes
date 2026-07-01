@@ -15,10 +15,12 @@ interface LedgerEntry {
 }
 
 interface Match {
-  id: string;
+  matchId: string;       // Warden returns matchId, not id
+  id?: string;           // guard against stale field
   status: string;
   gameId: string;
-  players: string[];
+  players?: string[];
+  state?: { matchId?: string; players?: string[] };
   round?: number;
   phase?: string;
   lastMove?: string;
@@ -105,26 +107,33 @@ export default function StreamPage() {
       const res = await fetch(apiUrl("/matches"));
       if (!res.ok) return;
       const data = await res.json();
-      const list: Match[] = Array.isArray(data) ? data : data.matches ?? [];
-      const active = list.filter((m) => m.status === "ACTIVE" || m.status === "IN_PROGRESS");
+      const list: Match[] = Array.isArray(data) ? data : (data.matches ?? []);
+      // Normalise: some Warden builds nest state.matchId; surface it as matchId
+      const normalised = list.map((m) => ({
+        ...m,
+        matchId: m.matchId ?? m.state?.matchId ?? m.id ?? "",
+        players: m.players ?? m.state?.players ?? [],
+      }));
+      const active = normalised.filter((m) => m.status === "ACTIVE" || m.status === "AWAITING_STAKES");
       setMatches(active);
 
       // Build feed events from new matches or state changes
       const now = Date.now();
       const newEvents: FeedEvent[] = [];
       for (const m of active) {
-        if (!prevMatchIds.current.has(m.id)) {
+        if (!m.matchId) continue;
+        if (!prevMatchIds.current.has(m.matchId)) {
           newEvents.push({
-            matchId: m.id,
-            gameId: m.gameId,
-            text: `New match started: ${m.gameId} — ${m.players?.length ?? 2} players`,
+            matchId: m.matchId,
+            gameId: m.gameId ?? "match",
+            text: `New match started: ${m.gameId ?? "match"} — ${m.players?.length ?? 2} players`,
             ts: now,
           });
         } else if (m.lastMove) {
           newEvents.push({
-            matchId: m.id,
-            gameId: m.gameId,
-            text: `[${m.id.slice(0, 8)}] ${m.lastMove}`,
+            matchId: m.matchId,
+            gameId: m.gameId ?? "match",
+            text: `[${m.matchId.slice(0, 8)}] ${m.lastMove}`,
             ts: now,
           });
         }
@@ -132,14 +141,14 @@ export default function StreamPage() {
       if (newEvents.length > 0) {
         setFeed((prev) => [...newEvents, ...prev].slice(0, 5));
       }
-      prevMatchIds.current = new Set(active.map((m) => m.id));
+      prevMatchIds.current = new Set(active.map((m) => m.matchId).filter(Boolean));
 
       // Auto-select first active match if none selected
       if (active.length > 0 && !selectedMatch) {
-        setSelectedMatch(active[0].id);
+        setSelectedMatch(active[0].matchId);
       }
-      if (selectedMatch && !active.find((m) => m.id === selectedMatch)) {
-        setSelectedMatch(active[0]?.id ?? null);
+      if (selectedMatch && !active.find((m) => m.matchId === selectedMatch)) {
+        setSelectedMatch(active[0]?.matchId ?? null);
       }
     } catch {
       // silent
@@ -157,7 +166,7 @@ export default function StreamPage() {
     };
   }, []);
 
-  const liveMatch = matches.find((m) => m.id === selectedMatch) ?? matches[0] ?? null;
+  const liveMatch = matches.find((m) => m.matchId === selectedMatch) ?? matches[0] ?? null;
 
   return (
     <div
@@ -289,7 +298,7 @@ export default function StreamPage() {
                     marginBottom: 24,
                   }}
                 >
-                  {liveMatch.id}
+                  {liveMatch.matchId}
                 </div>
 
                 <div
@@ -340,7 +349,7 @@ export default function StreamPage() {
                 >
                   Spectate:{" "}
                   <span style={{ color: "#888" }}>
-                    {STREAM_URL}?match={liveMatch.id}
+                    {STREAM_URL}?match={liveMatch.matchId}
                   </span>
                 </div>
               </>
@@ -380,13 +389,13 @@ export default function StreamPage() {
               </div>
               {matches.map((m) => (
                 <button
-                  key={m.id}
+                  key={m.matchId}
                   type="button"
-                  onClick={() => setSelectedMatch(m.id)}
+                  onClick={() => setSelectedMatch(m.matchId)}
                   style={{
-                    background: selectedMatch === m.id ? "#F5E635" : "transparent",
-                    color: selectedMatch === m.id ? "#0A0A0A" : "#888",
-                    border: `1.5px solid ${selectedMatch === m.id ? "#F5E635" : "#333"}`,
+                    background: selectedMatch === m.matchId ? "#F5E635" : "transparent",
+                    color: selectedMatch === m.matchId ? "#0A0A0A" : "#888",
+                    border: `1.5px solid ${selectedMatch === m.matchId ? "#F5E635" : "#333"}`,
                     padding: "3px 10px",
                     fontSize: "0.65rem",
                     fontFamily: "'IBM Plex Mono', ui-monospace, monospace",
@@ -394,7 +403,7 @@ export default function StreamPage() {
                     letterSpacing: "0.06em",
                   }}
                 >
-                  {m.gameId?.slice(0, 6).toUpperCase()} {m.id.slice(0, 6)}
+                  {(m.gameId ?? "match").slice(0, 6).toUpperCase()} {m.matchId?.slice(0, 6) ?? "?"}
                 </button>
               ))}
             </div>

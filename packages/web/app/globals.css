@@ -115,12 +115,14 @@ h1, h2, h3 {
 .brand .globe-icon { display: inline-flex; }
 .brand b { font-weight: 700; }
 .brand i { font-style: normal; color: var(--text-muted); }
-.topnav { display: flex; align-items: center; gap: 28px; }
+.topnav { display: flex; align-items: center; gap: 32px; white-space: nowrap; }
 .topnav a {
   font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase;
-  text-decoration: none; color: var(--text-muted); padding: 6px 0; border-bottom: 2px solid transparent;
+  text-decoration: none; color: var(--text-muted); padding: 6px 2px; white-space: nowrap;
+  border-bottom: none; transition: color 0.15s;
 }
-.topnav a:hover, .topnav a.is-active { color: var(--text); border-bottom-color: var(--ink); }
+.topnav a:hover { color: var(--text); text-decoration: none; }
+.topnav a.is-active { color: var(--text); font-weight: 700; }
 .topnav .pulse-dot { color: var(--settle-bright); }
 
 .menu-toggle {
@@ -142,8 +144,9 @@ h1, h2, h3 {
     padding: 6px 20px 18px;
   }
   .topnav.is-open { transform: translateY(0); opacity: 1; visibility: visible; pointer-events: auto; }
-  .topnav a { padding: 14px 0; border-bottom: 1px solid var(--panel-2); width: 100%; }
-  .topnav a:hover, .topnav a.is-active { border-bottom-color: var(--panel-2); }
+  .topnav a { padding: 14px 0; border-bottom: 1px solid var(--panel-2); width: 100%; white-space: nowrap; }
+  .topnav a:hover { color: var(--text); }
+  .topnav a.is-active { color: var(--text); font-weight: 700; border-bottom-color: var(--panel-2); }
   .topnav #wardenStatus { padding: 14px 0; border-bottom: 1px solid var(--panel-2); }
   .topnav .btn { margin-top: 14px; width: 100%; justify-content: center; }
 }
