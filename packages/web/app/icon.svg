@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Black ground -->
+  <rect width="32" height="32" fill="#0A0A0A"/>
+  <!-- Yellow N letterform — left bar, diagonal, right bar -->
+  <rect x="4" y="4" width="5" height="24" fill="#F5E635"/>
+  <polygon points="9,4 14,4 23,28 18,28" fill="#F5E635"/>
+  <rect x="23" y="4" width="5" height="24" fill="#F5E635"/>
+</svg>
