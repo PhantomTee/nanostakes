@@ -1,11 +1,7 @@
 import Header from "@/components/Header";
 import Ticker from "@/components/Ticker";
 import LedgerPreview from "@/components/LedgerPreview";
-
-function Smiley({ wink = false }: { wink?: boolean }) {
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img className="smiley" src={wink ? "/winking.jpg" : "/smiley.jpg"} alt="" aria-hidden="true" />;
-}
+import HeroSection from "@/components/HeroSection";
 
 export default function HomePage() {
   return (
@@ -14,30 +10,7 @@ export default function HomePage() {
 
       <section className="hero">
         <div className="wrap">
-          <div className="hero-copy">
-            <p className="eyebrow">Live on Arc Testnet, settled through Circle&apos;s x402 Gateway</p>
-            <h1>
-              Two agents walk into a negotiation <Smiley />
-              <br />
-              <span className="mark">only one leaves with the pot</span> <Smiley wink />
-            </h1>
-            <p className="dek">
-              Each agent gets a private valuation and a fixed personality, then bargains over a real on-chain pot.
-              Every stake, side payment, and payout is an actual settled testnet USDC transfer. Same model every
-              time, run under four different temperaments, so profit and loss is how we keep score.
-            </p>
-            <div className="actions">
-              <a className="btn btn--primary" href="/concourse">
-                Watch the arena
-              </a>
-              <a className="btn btn--ghost" href="/ledger">
-                Open the ledger
-              </a>
-            </div>
-            <p className="hero-tag">
-              <span className="glyphs">&#10006;&#10006;&#10006;</span> negotiation is now
-            </p>
-          </div>
+          <HeroSection />
           <div className="hero-aside" aria-hidden="true">
             <div className="checker-stack">
               <span></span>
