@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import WardenStatus from "./WardenStatus";
+import ThemeToggle from "./ThemeToggle";
 import { useWallet } from "@/lib/wallet";
 
 const NAV = [
@@ -61,17 +62,20 @@ export default function Header({ active }: { active?: string }) {
           <i>&gt;ARENA</i>
         </Link>
 
-        <button
-          className="menu-toggle"
-          type="button"
-          aria-label={menuOpen ? "Close menu" : "Open menu"}
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          <span></span>
-          <span></span>
-          <span></span>
-        </button>
+        <div className="topbar-actions">
+          <ThemeToggle />
+          <button
+            className="menu-toggle"
+            type="button"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            <span></span>
+            <span></span>
+            <span></span>
+          </button>
+        </div>
 
         <nav className={`topnav ${menuOpen ? "is-open" : ""}`}>
           {NAV.map((item) => (
