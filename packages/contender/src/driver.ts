@@ -181,13 +181,29 @@ async function playMatch(
   const log = onEvent ?? (() => {});
 
   const preStakeState = await getState(wardenUrl, matchId, me);
-  const stakePayment = await payStakeWithRetry(
-    client,
-    `${wardenUrl}/match/${matchId}/stake`,
-    ENTRY_STAKE_EACH,
-    log,
-  );
-  log(`${agent.name} staked entry for match ${matchId} (${stakePayment.transaction})`);
+  const isEurcMatch = (preStakeState as any).stakeAsset === "EURC";
+  let stakeTx: string;
+  if (isEurcMatch) {
+    // EURC match: the Warden pulls the stake directly from the session wallet,
+    // so no x402 payment is needed from this side — just POST the player address.
+    const stakeRes = await fetch(`${wardenUrl}/match/${matchId}/stake/eurc`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ player: me }),
+    });
+    if (!stakeRes.ok) throw new Error(`EURC stake failed: ${stakeRes.status} ${await stakeRes.text()}`);
+    const stakeData = await stakeRes.json() as { transaction: string };
+    stakeTx = stakeData.transaction;
+  } else {
+    const stakePayment = await payStakeWithRetry(
+      client,
+      `${wardenUrl}/match/${matchId}/stake`,
+      ENTRY_STAKE_EACH,
+      log,
+    );
+    stakeTx = stakePayment.transaction;
+  }
+  log(`${agent.name} staked entry for match ${matchId} (${stakeTx})`);
 
   switch (preStakeState.gameId) {
     case "standoff":

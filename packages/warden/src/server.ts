@@ -18,6 +18,7 @@ import { emitConcourseEvent, subscribeConcourse } from "./events.js";
 import {
   createAgent,
   getAgent,
+  getAgentBySessionAddress,
   listAgentsByOwner,
   listActiveAgents,
   setAgentStatus,
@@ -361,14 +362,15 @@ app.post("/challenges/:id/respond", gateway.require("$0.000001"), (req: PaidRequ
 
 /** Create a new match. No payment required — payment happens at /stake. */
 app.post("/match", (req: Request, res: Response) => {
-  const { gameId, players, temperaments, name } = req.body as {
+  const { gameId, players, temperaments, name, stakeAsset } = req.body as {
     gameId: string;
     players: string[];
     temperaments?: Record<string, Temperament>;
     name?: string;
+    stakeAsset?: "USDC" | "EURC";
   };
   try {
-    const record = createMatch(gameId, players, temperaments ? { temperaments } : undefined, name);
+    const record = createMatch(gameId, players, temperaments ? { temperaments } : undefined, name, stakeAsset);
     emitConcourseEvent({
       type: "match.created",
       matchId: record.state.matchId,
@@ -462,6 +464,67 @@ app.post(
     res.json({ staked: record.staked, status: record.status, transaction: req.payment?.transaction });
   },
 );
+
+/**
+ * EURC-denominated stake: the Warden pulls the entry fee directly from the
+ * player's session wallet using the stored (encrypted) private key, so no
+ * x402 Gateway challenge is needed. Only valid on matches with stakeAsset=EURC.
+ */
+app.post("/match/:id/stake/eurc", async (req: Request, res: Response) => {
+  const record = getMatch(req.params.id);
+  if (!record) { res.status(404).json({ error: "unknown match" }); return; }
+  if ((record.state as any).stakeAsset !== "EURC") {
+    res.status(400).json({ error: "this match uses USDC staking — call /match/:id/stake instead" });
+    return;
+  }
+  const { player } = req.body as { player?: string };
+  if (!player) { res.status(400).json({ error: "player address required" }); return; }
+  const matchPlayer = record.state.players.find((p) => p.toLowerCase() === player.toLowerCase());
+  if (!matchPlayer) { res.status(400).json({ error: "player is not a participant in this match" }); return; }
+  if (record.staked[matchPlayer]) { res.status(409).json({ error: "player has already staked" }); return; }
+
+  // Look up the agent to get their session private key
+  const agent = getAgentBySessionAddress(matchPlayer);
+  if (!agent || !agent.sessionPrivateKey) {
+    res.status(400).json({ error: "no owned agent found for this session address — only Warden-managed agents can stake EURC" });
+    return;
+  }
+
+  try {
+    const { getEurcBalance, transferEurc, EURC_ADDRESS } = await import("./eurc.js");
+    const stakeAmount = record.state.entryStakeEach;
+    const { balance, formatted } = await getEurcBalance(matchPlayer as `0x${string}`);
+    const stakeWei = BigInt(Math.round(stakeAmount * 1_000_000)); // 6-decimal EURC
+    if (balance < stakeWei) {
+      res.status(402).json({ error: `insufficient EURC balance — have ${formatted}, need ${stakeAmount.toFixed(6)}` });
+      return;
+    }
+
+    // Pull stake from player's session wallet into the Warden's wallet
+    const txHash = await transferEurc(
+      agent.sessionPrivateKey as `0x${string}`,
+      wardenAccount.address as `0x${string}`,
+      stakeAmount,
+    );
+
+    record.staked[matchPlayer] = true;
+    record.stakeTxs = { ...(record.stakeTxs ?? {}), [matchPlayer]: txHash };
+    if (record.state.players.every((p) => record.staked[p])) {
+      record.status = "ACTIVE";
+    }
+    persistMatch(record);
+    emitConcourseEvent({
+      type: "match.staked",
+      matchId: record.state.matchId,
+      gameId: record.gameId,
+      at: Date.now(),
+      data: { payer: matchPlayer, transaction: txHash, currency: "EURC", status: record.status },
+    });
+    res.json({ staked: record.staked, status: record.status, transaction: txHash, currency: "EURC" });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
 
 app.get("/match/:id/state", (req: Request, res: Response) => {
   const record = getMatch(req.params.id);

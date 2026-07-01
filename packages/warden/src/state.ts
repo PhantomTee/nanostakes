@@ -61,6 +61,7 @@ export function createMatch(
   players: Address[],
   meta?: MatchRecord["meta"],
   name?: string,
+  stakeAsset?: "USDC" | "EURC",
 ): MatchRecord {
   const game = getGame(gameId);
   if (players.length < game.manifest.minPlayers || players.length > game.manifest.maxPlayers) {
@@ -68,7 +69,8 @@ export function createMatch(
       `${gameId} requires between ${game.manifest.minPlayers} and ${game.manifest.maxPlayers} players, got ${players.length}`,
     );
   }
-  const state = game.initState(players) as BrinkmanshipState | StandoffState | PromptWarState | PromptInjectionState;
+  const initOpts = stakeAsset ? { stakeAsset } : undefined;
+  const state = game.initState(players, initOpts) as BrinkmanshipState | StandoffState | PromptWarState | PromptInjectionState;
   const autoName = `${gameId.charAt(0).toUpperCase()}${gameId.slice(1)} #${state.matchId.slice(0, 4).toUpperCase()}`;
   const record: MatchRecord = {
     gameId,

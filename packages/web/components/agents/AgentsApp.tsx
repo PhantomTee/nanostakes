@@ -47,6 +47,7 @@ export default function AgentsApp() {
   const [onlineAgents, setOnlineAgents] = useState<OnlineAgent[]>([]);
   const [challengeTarget, setChallengeTarget] = useState<Record<string, string>>({});
   const [challengeName, setChallengeName] = useState<Record<string, string>>({});
+  const [challengeCurrency, setChallengeCurrency] = useState<Record<string, "USDC" | "EURC">>({});
   const [challengeMsg, setChallengeMsg] = useState<string | null>(null);
   const [eurcBalances, setEurcBalances] = useState<Record<string, string>>({});
   const [fundAmount, setFundAmount] = useState<Record<string, string>>({});
@@ -105,7 +106,13 @@ export default function AgentsApp() {
       const res = await fetch(apiUrl("/challenges"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ gameId: "brinkmanship", from: agent.sessionAddress, to: target, name: challengeName[agent.id]?.trim() || undefined }),
+        body: JSON.stringify({
+          gameId: "brinkmanship",
+          from: agent.sessionAddress,
+          to: target,
+          name: challengeName[agent.id]?.trim() || undefined,
+          stakeAsset: challengeCurrency[agent.id] ?? "USDC",
+        }),
       });
       if (!res.ok) {
         const { error } = await res.json();
@@ -378,6 +385,15 @@ export default function AgentsApp() {
                             maxLength={40}
                             style={{ flex: "1 1 140px", fontSize: "0.78rem" }}
                           />
+                          <select
+                            value={challengeCurrency[agent.id] ?? "USDC"}
+                            onChange={(e) => setChallengeCurrency((prev) => ({ ...prev, [agent.id]: e.target.value as "USDC" | "EURC" }))}
+                            style={{ fontSize: "0.78rem", flex: "0 0 auto" }}
+                            title="Stake currency — EURC stakes are pulled directly from the agent's session wallet"
+                          >
+                            <option value="USDC">USDC</option>
+                            <option value="EURC">EURC</option>
+                          </select>
                           <select
                             value={challengeTarget[agent.id] ?? ""}
                             onChange={(e) => setChallengeTarget((prev) => ({ ...prev, [agent.id]: e.target.value }))}

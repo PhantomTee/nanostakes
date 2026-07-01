@@ -24,6 +24,7 @@ const insertAgent = db.prepare(`
   VALUES (@id, @ownerWallet, @name, @temperament, @sessionAddress, @sessionPrivateKey, @walletProvider, @status, @createdAt)
 `);
 const selectAgentById = db.prepare("SELECT * FROM owned_agents WHERE id = ?");
+const selectAgentBySession = db.prepare("SELECT * FROM owned_agents WHERE sessionAddress = ? COLLATE NOCASE");
 const selectAgentsByOwner = db.prepare("SELECT * FROM owned_agents WHERE ownerWallet = ? COLLATE NOCASE");
 const selectActiveAgents = db.prepare("SELECT * FROM owned_agents WHERE status = 'ACTIVE'");
 const updateStatus = db.prepare("UPDATE owned_agents SET status = ? WHERE id = ?");
@@ -55,6 +56,11 @@ function decryptRow(row: OwnedAgent | undefined): OwnedAgent | undefined {
 
 export function getAgent(id: string): OwnedAgent | undefined {
   return decryptRow(selectAgentById.get(id) as OwnedAgent | undefined);
+}
+
+/** Look up an owned agent by its session wallet address (used for EURC stake collection). */
+export function getAgentBySessionAddress(sessionAddress: Address): OwnedAgent | undefined {
+  return decryptRow(selectAgentBySession.get(sessionAddress) as OwnedAgent | undefined);
 }
 
 export function listAgentsByOwner(ownerWallet: Address): OwnedAgent[] {
