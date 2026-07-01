@@ -570,3 +570,160 @@ select, input {
   font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-muted);
 }
 .footer .docket { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+
+/* ════════════════════════════════════════════════════════════════════
+   MOBILE OVERHAUL — everything below is mobile-first hardening
+   ════════════════════════════════════════════════════════════════════ */
+
+/* ── Touch targets: every interactive element ≥ 44px ── */
+button, .btn, select, input[type="text"], input[type="number"], input[type="password"] {
+  min-height: 44px;
+}
+select { min-width: 0; max-width: 100%; }
+
+/* ── Ledger scroll: native momentum scrolling on iOS ── */
+.ledger-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Ledger card: no horizontal bleed on small screens ── */
+.ledger-card {
+  padding: 20px;
+}
+@media (max-width: 480px) {
+  .ledger-card {
+    padding: 16px;
+    box-shadow: 6px 6px 0 0 var(--ink);
+  }
+}
+
+/* ── Player grid already has a 640px breakpoint; reinforce ── */
+@media (max-width: 480px) {
+  .player-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Concourse arena: shrink avatar track on narrow screens ── */
+@media (max-width: 480px) {
+  .arena-ring { padding: 12px 14px; }
+  .arena-avatar { width: 80px; }
+  .arena-track { left: 66px; right: 66px; }
+  .arena-avatar .dot { width: 36px; height: 36px; font-size: 0.78rem; }
+}
+
+/* ── Round panels: slightly tighter on mobile ── */
+@media (max-width: 480px) {
+  .round-panel { padding: 12px 14px; }
+  .t-row { font-size: 0.78rem; }
+}
+
+/* ── Podium: already collapses to 1-col; tighten padding ── */
+@media (max-width: 480px) {
+  .podium-spot { padding: 18px 14px 16px; }
+  .podium-pnl { font-size: 1.3rem; }
+}
+
+/* ── Agent tickets: full-width actions on small screens ── */
+@media (max-width: 480px) {
+  .player-ticket > div[style*="display: flex"] {
+    flex-wrap: wrap;
+  }
+}
+
+/* ── Buttons stacking in wrapped flex ── */
+@media (max-width: 480px) {
+  .btn { padding: 12px 18px; font-size: 0.75rem; }
+  .btn--primary::before, .btn--primary::after { display: none; }
+}
+
+/* ── Sticky topbar: keep brand readable ── */
+@media (max-width: 380px) {
+  .brand i { display: none; }
+  .topbar .wrap { padding: 0 14px; }
+}
+
+/* ── .wrap padding floors at 16px on very small phones ── */
+@media (max-width: 380px) {
+  .wrap { padding: 0 16px; }
+}
+
+/* ── Hero: ensure heading never breaks layout ── */
+@media (max-width: 480px) {
+  .hero h1 { font-size: clamp(1.75rem, 8vw, 2.4rem); }
+  .hero .dek { font-size: 0.97rem; }
+  .hero .actions { flex-direction: column; }
+  .hero .actions .btn { width: 100%; justify-content: center; }
+}
+
+/* ── Clauses: already 1-col below 600px ── */
+@media (max-width: 480px) {
+  .clause { gap: 4px; }
+  .clause__label { font-size: 1rem; }
+  .clause__body { font-size: 0.88rem; }
+}
+
+/* ── Section padding on very small screens ── */
+@media (max-width: 380px) {
+  .section { padding: 44px 0; }
+  .section--tight { padding: 28px 0; }
+}
+
+/* ── Dossier grid: already goes 1-col at 560px; tighten cards ── */
+@media (max-width: 560px) {
+  .dossier-card { padding: 18px; }
+}
+
+/* ── Footer: stack the two items ── */
+@media (max-width: 480px) {
+  .footer .wrap { flex-direction: column; align-items: flex-start; gap: 10px; }
+}
+
+/* ── Ledger table: shrink column padding on tablets ── */
+@media (max-width: 900px) {
+  table.ledger th, table.ledger td { padding: 8px 8px; font-size: 0.82rem; }
+}
+
+/* ── Agent fund input row: let it wrap cleanly ── */
+@media (max-width: 480px) {
+  .ledger-card form,
+  .ledger-card > div[style*="display: flex"] { flex-wrap: wrap; }
+}
+
+/* ── Seal badges: never clip on tiny screens ── */
+.seal { white-space: nowrap; }
+
+/* ── Match sheet: full-width on any phone ── */
+@media (max-width: 640px) {
+  /* The agent sheet is fixed-bottom by default — ensure no horizontal overflow */
+  body:has([data-sheet]) { overflow: hidden; }
+}
+
+/* ── Stamp seal: scale down slightly on mobile ── */
+@media (max-width: 480px) {
+  .stamp-seal { width: 80px; height: 80px; font-size: 0.75rem; }
+}
+
+/* ── Feed panel: full-width scroll ── */
+.feed-panel { -webkit-overflow-scrolling: touch; }
+
+/* ── Topnav links inside mobile menu: larger tap area ── */
+@media (max-width: 760px) {
+  .topnav a { min-height: 48px; display: flex; align-items: center; }
+}
+
+/* ── Agents page: challenge selector row ── */
+@media (max-width: 480px) {
+  .player-ticket > div[style*="flex: 1 1 160px"] { flex: 1 1 100%; }
+}
+
+/* ── Withdraw chain selector: fill width on mobile ── */
+@media (max-width: 480px) {
+  .player-ticket select { width: 100%; }
+}
+
+/* ── Tournaments / stream / tutorial new pages ── */
+@media (max-width: 640px) {
+  /* Tournament standings table */
+  table { font-size: 0.8rem; }
+  table th, table td { padding: 7px 8px; }
+}
