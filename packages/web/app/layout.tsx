@@ -16,6 +16,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             __html: `try{var t=localStorage.getItem('ns:theme');if(t==='dark'||(t===null&&window.matchMedia('(prefers-color-scheme:dark)').matches)){document.documentElement.setAttribute('data-theme','dark')}}catch(e){}`,
           }}
         />
+        {/* Auto-reload on ChunkLoadError — happens when a new deploy invalidates cached chunk hashes */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.addEventListener('error',function(e){if(e&&e.message&&(e.message.indexOf('ChunkLoadError')!==-1||e.message.indexOf('Loading chunk')!==-1)){window.location.reload()}});`,
+          }}
+        />
       </head>
       <body>
         <WalletProvider>{children}</WalletProvider>
